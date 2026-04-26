@@ -118,6 +118,11 @@ Avoid:
 - Do not swallow errors
 - Do not use broad `except`
 
+**Inside graph nodes**, distinguish two failure modes:
+
+- **Programmer error** (KeyError on a guaranteed shard field, schema mismatch from a co-developed node, type errors): raise. The graph should crash, the test should fail loudly, the cause is a code bug.
+- **Contract failure** (LLM returned malformed JSON, Bedrock 5xx, disk read failed, cassette missing in replay mode): catch the specific exception, return `{"errors": [ErrorRecord(...)]}` with `severity="error"` and a specific message. Architecture.md §7.4 mandates that degraded runs still produce a partial report — raising here breaks that. The whole pipeline must remain capable of completing even when individual nodes fail their contracts.
+
 ---
 
 ## Schema Discipline
@@ -161,6 +166,22 @@ The LLM must:
 - Reuse existing abstractions where appropriate
 - Prefer omission over fabrication
 - Explicitly link related entities via IDs
+
+---
+
+## LLM Call Discipline
+
+These rules govern code-gen for any node that calls a language model. The cassette infrastructure and stub registry are specified in `architecture.md` §11.6.1 and §6 — follow them exactly; deviation breaks test determinism in ways that surface only in CI.
+
+1. **All LLM calls go through `releaselens.llm.call(node_name, system=..., user=...)`.** Never import `litellm` or any provider SDK directly inside a node. The wrapper is the seam that makes cassettes work; bypassing it bypasses tests and produces flakes that take hours to diagnose.
+
+2. **Every LLM-bearing node registers a deterministic stub at module load** via `llm.register_stub(node_name, response_json)`. The stub must produce a response that the node's downstream parser accepts so the smoke test can run the full graph under `RELEASELENS_LLM_MODE=stub` without cassettes or Bedrock creds. A node that calls the LLM but doesn't register a stub is a broken node.
+
+3. **JSON-out LLM nodes follow this template:** prompt the model for strict JSON only, strip ```json fences if the model wraps them, validate the response against a private Pydantic extraction model, then map to the public schema with deterministic IDs. Never `json.loads` straight into the public schema — the extraction-model step is what makes prompt drift visible as a clean validation error rather than a mysterious AttributeError downstream.
+
+4. **Stable IDs follow the rule in `architecture.md` §4.1 / §4.2** — `<pep_id_lower>.<slug-of-title>` for features, `<feature_id>.claim-NN` for claims (1-based source-order index). Never use UUIDs, never include random or time-based bits. Eval set arithmetic (§11.3) depends on the same input always producing the same IDs.
+
+5. **Cassette modes are not interchangeable.** Default tests run in `replay`. Recording is `record-missing`, used once locally with Bedrock creds. CI never records. A test that calls the LLM must skip-with-instruction (not silently call live) when `replay` mode is active and the cassette is absent.
 
 ---
 
