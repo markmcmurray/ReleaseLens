@@ -223,3 +223,6 @@ reports/
 
 # Local PEP cache (CLI copies fixtures here on demand)
 data/peps/*.rst
+
+# Tool source clones for evidence_static (per README setup; user-managed)
+data/sources/
