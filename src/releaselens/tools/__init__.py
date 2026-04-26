@@ -3,7 +3,7 @@
 Each submodule has a uniform stub-mode toggle via ``RELEASELENS_<TOOL>_MODE``.
 """
 
-from releaselens.tools import ripgrep
+from releaselens.tools import github, ripgrep
 from releaselens.tools._stub_mode import StubNotRegistered, mode_for, reset_stubs
 
-__all__ = ["StubNotRegistered", "mode_for", "reset_stubs", "ripgrep"]
+__all__ = ["StubNotRegistered", "github", "mode_for", "reset_stubs", "ripgrep"]
