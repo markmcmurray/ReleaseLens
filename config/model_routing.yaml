@@ -1,0 +1,62 @@
+# Per-node model routing — see architecture.md §6.
+# In the scaffold, every node resolves to "stub" via routing.get_model_for().
+# Real Bedrock IDs are pinned in model_pins.yaml and referenced by family alias here.
+
+defaults:
+  temperature: 0.0
+  max_tokens: 4000
+  fallback_strategy: cross_family
+  timeout_seconds: 60
+
+nodes:
+  pep_ingest:
+    model: bedrock/anthropic.claude-haiku-4-5
+    rationale: "Structural parsing of RST. No reasoning load."
+
+  feature_extract:
+    model: bedrock/anthropic.claude-sonnet-4-5
+    max_tokens: 8000
+    rationale: "Long PEP context + atomic-feature decomposition needs strong reasoning."
+
+  test_author:
+    model: bedrock/anthropic.claude-sonnet-4-5
+    max_tokens: 4000
+    rationale: "Differential test generation; asymmetric with critic."
+
+  critic:
+    model: bedrock/anthropic.claude-haiku-4-5
+    max_tokens: 1500
+    rationale: "Score against rubric. Cheaper than the author it critiques."
+
+  evidence_static:
+    model: bedrock/anthropic.claude-haiku-4-5
+    rationale: "Per (feature, tool) parallel — cost dominates."
+
+  evidence_changelog:
+    model: bedrock/anthropic.claude-haiku-4-5
+    rationale: "Pattern-match PEP refs in CHANGELOG.md."
+
+  evidence_probe:
+    model: bedrock/anthropic.claude-haiku-4-5
+    rationale: "Interpret structured probe output."
+
+  evidence_aggregate:
+    model: none
+    rationale: "Confidence math + version reconciliation. Pure Python."
+
+  matrix_build:
+    model: none
+    rationale: "Deterministic rollup."
+
+  verify:
+    model: bedrock/anthropic.claude-sonnet-4-5
+    rationale: "Claim↔evidence reconciliation."
+
+  impact_scope:
+    model: bedrock/anthropic.claude-sonnet-4-5
+    max_tokens: 6000
+    rationale: "Engineer-style scoping."
+
+  report_render:
+    model: bedrock/anthropic.claude-haiku-4-5
+    rationale: "Markdown templating."

@@ -51,6 +51,13 @@ from releaselens.schemas import (
 )
 
 
+def dict_merge[K, V](a: dict[K, V] | None, b: dict[K, V] | None) -> dict[K, V]:
+    """Shallow-merge reducer for dict fields with disjoint-key concurrent writes."""
+    if a is None: return dict(b or {})
+    if b is None: return dict(a)
+    return {**a, **b}
+
+
 class PipelineState(TypedDict, total=False):
     # ---- Inputs (set at graph invocation) ----
     run_id: str
@@ -61,13 +68,13 @@ class PipelineState(TypedDict, total=False):
     test_acceptance_threshold: float  # default 0.75, see §7.3
 
     # ---- Stage outputs (filled progressively) ----
-    pep_sources: dict[str, PEPSource]                          # by pep_id
+    pep_sources: Annotated[dict[str, PEPSource], dict_merge]   # by pep_id; per-pep_id Send shards
     features: Annotated[list[Feature], add]                    # fan-in from feature_extract
     differential_tests: Annotated[list[DifferentialTest], add] # fan-in from test_author
     test_critiques: Annotated[list[TestCritique], add]         # fan-in from critic
     test_authoring_results: Annotated[list[TestAuthoringResult], add]
     evidence: Annotated[list[ImplementationEvidence], add]     # fan-in from evidence_*
-    matrices: dict[str, FeatureMatrix]                         # by pep_id
+    matrices: Annotated[dict[str, FeatureMatrix], dict_merge]  # by pep_id
     verifications: Annotated[list[VerificationResult], add]
     impacts: Annotated[list[ImpactFinding], add]               # fan-in from impact_scope
     report: FeatureReport | None
@@ -76,7 +83,7 @@ class PipelineState(TypedDict, total=False):
     errors: Annotated[list[ErrorRecord], add]
 ```
 
-**Reducer rule:** every field that receives concurrent writes from `Send`-fanned nodes is `Annotated[..., add]`. Single-writer fields are plain. Get this wrong and the second concurrent write silently overwrites the first.
+**Reducer rule:** every field that receives concurrent writes from `Send`-fanned nodes needs an explicit reducer. Lists use `Annotated[..., add]`. Dicts whose shards write disjoint keys (e.g. `pep_sources` and `matrices`, both keyed by `pep_id`) use the `dict_merge` reducer above — the LangGraph default replace-reducer would lose all but the last-arriving shard. Fields written by a single instance per run are plain. Get any of this wrong and concurrent writes silently overwrite each other.
 
 ---
 
@@ -417,16 +424,18 @@ nodes:
 ```mermaid
 flowchart TD
     START([start]) --> PI[pep_ingest<br/>Send: per pep_id]
-    PI --> FE[feature_extract<br/>Send: per pep_id]
-    FE --> TA_FANOUT{{Send: per testable SpecClaim}}
+    PI --> APIJ[after_pep_ingest<br/>join]
+    APIJ --> FE[feature_extract<br/>Send: per pep_id]
+    FE --> AFEJ[after_feature_extract<br/>join]
+    AFEJ --> TA_FANOUT{{Send: per testable SpecClaim}}
 
     TA_FANOUT --> TA[test_author]
     TA --> CR[critic]
-    CR -->|accept| TAR[test_authoring_results aggregator]
+    CR -->|accept| TAA[test_authoring_aggregate]
     CR -->|reject<br/>budget remaining| TA
-    CR -->|reject<br/>budget exhausted| TAR
+    CR -->|reject<br/>budget exhausted| TAA
 
-    TAR --> EV_FANOUT{{Send: per Feature × Tool}}
+    TAA --> EV_FANOUT{{Send: per Feature × Tool}}
     EV_FANOUT --> ES[evidence_static]
     ES -->|conf >= threshold| EAGG_IN
     ES -->|conf < threshold| EC[evidence_changelog]
@@ -435,12 +444,15 @@ flowchart TD
     EP --> EAGG_IN
 
     EAGG_IN[evidence_aggregate] --> MB[matrix_build]
-    MB --> VER[verify]
+    MB --> VER_FANOUT{{Send: per Feature}}
+    VER_FANOUT --> VER[verify]
     VER --> IMPACT_FANOUT{{Send: per Feature}}
     IMPACT_FANOUT --> IS[impact_scope]
     IS --> RR[report_render]
     RR --> END([end])
 ```
+
+**Join nodes between consecutive Send fan-outs.** LangGraph fires conditional edges *per Send shard*, not once on the merged state. Two consecutive fan-outs without a join between them re-fan N×N: e.g. `pep_ingest` → `feature_extract` (both per `pep_id`) would invoke `feature_extract` 9 times instead of 3. The diagram therefore inserts single-instance no-op join nodes (`after_pep_ingest`, `after_feature_extract`, `test_authoring_aggregate`) at every fan-out → fan-out boundary. The reducer rule in §3 only protects against silent overwrites in state; the join nodes protect against silent multiplicative re-execution in topology. Both are required.
 
 ### 7.2 Fan-out levels
 
@@ -477,6 +489,8 @@ Defaults: `test_retry_budget = 2` (so up to 3 author attempts), `test_acceptance
 The critic's `feedback` field is fed back into the next `test_author` invocation as part of the prompt — the author *sees* what was wrong with iteration N when producing iteration N+1. Without this, the loop is a sham; this is what makes it an evaluator-optimizer rather than a sampling retry.
 
 `SpecClaim.testable=False` claims skip the loop entirely and emit a `TestAuthoringResult` with `status="unverifiable"` directly. They show up in the report as descriptive-only verifications.
+
+`test_authoring_aggregate` is the loop's terminal join. Both `accept` and `budget_exhausted` paths route here; it materialises exactly one `TestAuthoringResult` per claim (with the appropriate `status`) and serves as the single-instance barrier before the evidence fan-out. Keeping it as its own node — not folded into `critic` — matters because the budget-exhausted path otherwise has no clean terminator.
 
 #### 7.3.2 Evidence escalation ladder (cost-gated short-circuit)
 
@@ -948,8 +962,9 @@ releaselens/
 │   ├── nodes/
 │   │   ├── pep_ingest.py
 │   │   ├── feature_extract.py
-│   │   ├── test_author.py        # §7.3.1
-│   │   ├── critic.py             # §7.3.1
+│   │   ├── test_author.py                # §7.3.1
+│   │   ├── critic.py                     # §7.3.1
+│   │   ├── test_authoring_aggregate.py   # §7.3.1 — loop terminal join
 │   │   ├── evidence_static.py
 │   │   ├── evidence_changelog.py
 │   │   ├── evidence_probe.py
@@ -957,7 +972,8 @@ releaselens/
 │   │   ├── matrix_build.py
 │   │   ├── verify.py
 │   │   ├── impact_scope.py
-│   │   └── report_render.py
+│   │   ├── report_render.py
+│   │   └── joins.py                      # §7.1 — after_pep_ingest, after_feature_extract
 │   ├── tools/                    # §9 — non-LLM tools
 │   │   ├── ripgrep.py
 │   │   ├── github.py             # commit archaeology
