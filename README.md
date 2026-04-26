@@ -14,6 +14,23 @@ uv run releaselens run --pep-ids 658
 
 The `run` command end-to-ends the pipeline against a bundled PEP-658 fixture and writes a Markdown report under `reports/`. The path is printed on completion alongside the `run_id` (use it with `releaselens resume <run_id>` to replay from the SQLite checkpoint at `.releaselens/checkpoints.db`).
 
+### Optional system dependencies
+
+The pipeline runs end-to-end without these — `evidence_static` will record a "static search skipped" note and the escalation ladder takes over — but you'll only see real `<tool>:<path>:<line>` source refs when both are present:
+
+- **`ripgrep`** on `PATH`. Not a Python package, so it can't go in `pyproject.toml`. Install with the platform package manager:
+  ```bash
+  brew install ripgrep            # macOS
+  apt-get install ripgrep         # Debian/Ubuntu
+  ```
+- **Local source clones** of the tools you want to grep. Defaults are `data/sources/{pip,uv,warehouse}/`; override the parent dir with `RELEASELENS_SOURCES_DIR=/path/to/clones`.
+  ```bash
+  mkdir -p data/sources
+  git clone --depth 1 https://github.com/pypa/pip data/sources/pip
+  git clone --depth 1 https://github.com/astral-sh/uv data/sources/uv
+  git clone --depth 1 https://github.com/pypi/warehouse data/sources/warehouse
+  ```
+
 ---
 
 ## Status
