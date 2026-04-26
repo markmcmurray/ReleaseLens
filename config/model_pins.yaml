@@ -1,8 +1,10 @@
 # Exact Bedrock model IDs. Family aliases in model_routing.yaml resolve here.
 # Pin before any eval run for reproducibility (architecture.md §6).
-# Placeholder values — replace with verified Bedrock IDs before first real run.
+#
+# Cross-region inference profiles (the eu.* prefix) are required for current-gen
+# Claude models in eu-west-1. ON_DEMAND base IDs only exist for older versions.
 
 pins:
-  bedrock/anthropic.claude-sonnet-4-5: anthropic.claude-sonnet-4-5-YYYYMMDD-v1:0
-  bedrock/anthropic.claude-haiku-4-5: anthropic.claude-haiku-4-5-YYYYMMDD-v1:0
-  bedrock/meta.llama-3-3-70b-instruct: meta.llama3-3-70b-instruct-v1:0
+  bedrock/anthropic.claude-sonnet-4-5: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
+  bedrock/anthropic.claude-haiku-4-5: bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0
+  bedrock/meta.llama-3-3-70b-instruct: bedrock/meta.llama3-3-70b-instruct-v1:0

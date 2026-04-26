@@ -8,6 +8,7 @@ Subcommands:
 
 from __future__ import annotations
 
+import shutil
 import uuid
 from pathlib import Path
 
@@ -16,6 +17,9 @@ import click
 from releaselens import __version__
 from releaselens.observability.langfuse import init_tracing
 from releaselens.schemas import TargetRef
+
+_DATA_PEPS = Path("data/peps")
+_FIXTURE_PEPS = Path("tests/fixtures/peps")
 
 
 @click.group(help="ReleaseLens — PEP-driven Python packaging impact analysis.")
@@ -53,6 +57,7 @@ def run_cmd(pep_ids: str, connector: str, package: str, package_version: str | N
 
     run_id = str(uuid.uuid4())
     pep_id_list = [_normalise_pep_id(p) for p in pep_ids.split(",") if p.strip()]
+    _ensure_pep_files_on_disk(pep_id_list)
     target = TargetRef(connector=connector, package=package, version=package_version)
 
     graph = build_graph()
@@ -107,6 +112,23 @@ def _normalise_pep_id(raw: str) -> str:
     if raw.upper().startswith("PEP-"):
         return raw.upper()
     return f"PEP-{raw}"
+
+
+def _ensure_pep_files_on_disk(pep_ids: list[str]) -> None:
+    """Copy bundled fixture PEPs into data/peps if missing.
+
+    Lets `releaselens run --pep-ids 658` work out of the box without manual
+    setup: the fixture is the dev source of truth until a real fetcher lands.
+    """
+    _DATA_PEPS.mkdir(parents=True, exist_ok=True)
+    for pep_id in pep_ids:
+        target = _DATA_PEPS / f"{pep_id}.rst"
+        if target.exists():
+            continue
+        fixture = _FIXTURE_PEPS / f"{pep_id}.rst"
+        if fixture.exists():
+            shutil.copyfile(fixture, target)
+            click.echo(f"Copied fixture {fixture} -> {target}")
 
 
 if __name__ == "__main__":

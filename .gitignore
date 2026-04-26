@@ -220,3 +220,6 @@ __marimo__/
 # ReleaseLens runtime artefacts
 .releaselens/
 reports/
+
+# Local PEP cache (CLI copies fixtures here on demand)
+data/peps/*.rst

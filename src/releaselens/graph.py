@@ -46,7 +46,12 @@ def _fanout_pep_ingest(state: PipelineState) -> list[Send]:
 
 
 def _fanout_feature_extract(state: PipelineState) -> list[Send]:
-    return [Send("feature_extract", {"pep_id": pid}) for pid in state.get("pep_ids", [])]
+    sources = state.get("pep_sources", {})
+    return [
+        Send("feature_extract", {"pep_id": pid, "source": sources[pid]})
+        for pid in state.get("pep_ids", [])
+        if pid in sources
+    ]
 
 
 def _fanout_test_author(state: PipelineState) -> list[Send]:
