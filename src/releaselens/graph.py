@@ -151,7 +151,13 @@ def _escalate_or_aggregate(state: PipelineState, *, source_method: str, next_nod
         (f for f in state.get("features", []) if f.id == latest.feature_id),
         None,
     )
-    return Send(next_node, {"feature": feature, "tool": latest.tool})
+    payload: dict[str, Any] = {"feature": feature, "tool": latest.tool}
+    if next_node == "evidence_probe":
+        # Send-launched nodes can't read state; bundle the test-authoring
+        # outputs the probe needs to pick a DifferentialTest.
+        payload["differential_tests"] = list(state.get("differential_tests") or [])
+        payload["test_authoring_results"] = list(state.get("test_authoring_results") or [])
+    return Send(next_node, payload)
 
 
 def _latest_evidence_by_method(state: PipelineState, method: str) -> Any:
