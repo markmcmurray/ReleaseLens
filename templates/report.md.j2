@@ -1,0 +1,35 @@
+# ReleaseLens Report
+
+**Run:** {{ run_id }}
+**PEPs:** {{ pep_ids | join(", ") }}
+**Target:** {% if target %}{{ target.connector }}/{{ target.package }}{% if target.version %}@{{ target.version }}{% endif %}{% else %}n/a{% endif %}
+
+## Executive summary
+
+- Features: {{ features | length }}
+- PEPs: {{ pep_ids | length }}
+- Verifications: {{ verifications | length }}
+- Impacts: {{ impacts | length }}
+
+## Per PEP
+
+{% for pep_id, matrix in matrices.items() %}
+### {{ pep_id }}
+
+{% for row in matrix.rows %}
+- **{{ row.feature_id }}** — {{ row.consensus_status }}
+{% endfor %}
+{% endfor %}
+
+## Per feature
+
+{% for feature in features %}
+### {{ feature.id }}
+
+{{ feature.description }}
+
+{% endfor %}
+
+## Appendix
+
+Run metadata, model routing, errors. STUB.
