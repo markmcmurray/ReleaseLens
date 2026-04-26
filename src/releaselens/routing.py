@@ -21,7 +21,9 @@ class LiteLLMConfig(BaseModel):
     timeout_seconds: int = 60
 
 
-_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "model_routing.yaml"
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+_DEFAULT_CONFIG_PATH = _CONFIG_DIR / "model_routing.yaml"
+_DEFAULT_PINS_PATH = _CONFIG_DIR / "model_pins.yaml"
 
 
 @lru_cache(maxsize=1)
@@ -30,20 +32,47 @@ def _load_routing(path: Path = _DEFAULT_CONFIG_PATH) -> dict:
         return yaml.safe_load(f)
 
 
+@lru_cache(maxsize=1)
+def _load_pins(path: Path = _DEFAULT_PINS_PATH) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    with path.open() as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("pins", {})
+
+
+def _resolve_pin(family_alias: str) -> str:
+    """Resolve a family alias to its pinned Bedrock model ID.
+
+    Architecture.md §6 says nodes reference family aliases in routing.yaml
+    and exact Bedrock IDs live in model_pins.yaml. Reproducibility for eval
+    runs depends on this — a missing pin raises rather than silently using
+    a wrong model.
+    """
+    pins = _load_pins()
+    if family_alias not in pins:
+        raise KeyError(
+            f"No pin for {family_alias!r} in model_pins.yaml. "
+            f"Add an entry mapping the alias to an exact Bedrock model ID."
+        )
+    return pins[family_alias]
+
+
 def get_model_for(node_name: str, *, stub: bool = True) -> LiteLLMConfig:
     """Return the LiteLLM config for a node.
 
-    In the scaffold, defaults to stub=True so no real model is ever resolved.
-    Set stub=False once nodes are ready to call Bedrock.
+    Defaults to ``stub=True`` so no real model is ever resolved by accident.
+    The LLM call wrapper passes ``stub=False`` when it intends to hit Bedrock.
     """
     routing = _load_routing()
     defaults = routing.get("defaults", {})
     node_cfg = routing.get("nodes", {}).get(node_name, {})
+    family_alias = node_cfg.get("model", "stub")
 
-    if stub:
+    if stub or family_alias == "stub" or family_alias == "none":
         model = "stub"
     else:
-        model = node_cfg.get("model", "stub")
+        model = _resolve_pin(family_alias)
 
     return LiteLLMConfig(
         model=model,
