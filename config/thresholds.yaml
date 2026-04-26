@@ -1,0 +1,18 @@
+# Numeric thresholds for the pipeline (architecture.md §7, §8, §12).
+
+confidence_threshold: 0.8        # §8 — evidence ladder short-circuits at/above
+test_retry_budget: 2             # §7.3.1, ADR-0007 — up to 3 author attempts
+test_acceptance_threshold: 0.75  # §7.3.1 — critic accept cutoff
+
+impact_scope:
+  existence_scan_seconds: 30     # §7.5
+  delta_token_cap: 2000
+  affected_paths_cap: 25
+
+litellm:
+  max_retries: 3
+  initial_backoff_seconds: 1.0
+  jitter: true
+
+graph:
+  max_concurrency: 10            # §7.2 — LangGraph compile starting point

@@ -1,0 +1,9 @@
+# PEPs in v1 demo scope (architecture.md §2). Curated list — no auto-discovery (ADR-0004).
+
+peps:
+  - id: PEP-658
+    rst_url: https://peps.python.org/pep-0658/
+  - id: PEP-691
+    rst_url: https://peps.python.org/pep-0691/
+  - id: PEP-740
+    rst_url: https://peps.python.org/pep-0740/

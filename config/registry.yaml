@@ -1,0 +1,11 @@
+# Registry connector configuration (architecture.md §5, ADR-0006).
+
+connectors:
+  devpi-public:
+    base_url: https://m.devpi.net
+    default_user: root
+    default_index: pypi
+
+  thirdparty:
+    # Stubbed — see connectors/thirdparty.py. v2 work.
+    enabled: false
