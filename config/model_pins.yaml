@@ -1,10 +1,20 @@
 # Exact Bedrock model IDs. Family aliases in model_routing.yaml resolve here.
 # Pin before any eval run for reproducibility (architecture.md §6).
 #
-# Cross-region inference profiles (the eu.* prefix) are required for current-gen
-# Claude models in eu-west-1. ON_DEMAND base IDs only exist for older versions.
+# Currently pinned to Amazon Nova because Anthropic-on-Bedrock requires a
+# use-case form submission per account. The two pinned families below have
+# direct on-demand access. Architecture §12.3 / ADR-0003 names cross-family
+# Bedrock fallback as a designed-in capability — Nova fills that role.
+#
+# When Anthropic use-case approval propagates, additional pins can be added:
+#   bedrock/anthropic.claude-sonnet: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
+#   bedrock/anthropic.claude-haiku:  bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0
+# and routing.yaml aliases flipped — no node code changes required.
+#
+# Verified IDs:
+#   aws bedrock list-inference-profiles --region eu-west-1
 
 pins:
-  bedrock/anthropic.claude-sonnet-4-5: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
-  bedrock/anthropic.claude-haiku-4-5: bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0
+  bedrock/amazon.nova-pro: bedrock/eu.amazon.nova-pro-v1:0
+  bedrock/amazon.nova-lite: bedrock/eu.amazon.nova-lite-v1:0
   bedrock/meta.llama-3-3-70b-instruct: bedrock/meta.llama3-3-70b-instruct-v1:0
