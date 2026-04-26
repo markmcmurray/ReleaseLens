@@ -96,7 +96,12 @@ def critic(shard: _Shard) -> Command:
     user_prompt = _build_user_prompt(shard)
 
     try:
-        raw = llm.call("critic", system=_SYSTEM_PROMPT, user=user_prompt)
+        raw = llm.call(
+            "critic",
+            system=_SYSTEM_PROMPT,
+            user=user_prompt,
+            metadata={"iteration": iteration, "claim_id": claim_id, "test_id": test_id},
+        )
         parsed = _RawCritique.model_validate_json(llm.strip_json_fences(raw))
     except (ValidationError, ValueError, json.JSONDecodeError, llm.CassetteMissing) as exc:
         return _terminate_with_error(claim_id, iteration, history, exc)

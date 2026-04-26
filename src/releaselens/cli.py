@@ -15,7 +15,11 @@ from pathlib import Path
 import click
 
 from releaselens import __version__
-from releaselens.observability.langfuse import init_tracing
+from releaselens.observability.langfuse import (
+    current_run_id,
+    get_callback_handler,
+    init_tracing,
+)
 from releaselens.schemas import TargetRef
 
 _DATA_PEPS = Path("data/peps")
@@ -60,6 +64,9 @@ def run_cmd(pep_ids: str, connector: str, package: str, package_version: str | N
     _ensure_pep_files_on_disk(pep_id_list)
     target = TargetRef(connector=connector, package=package, version=package_version)
 
+    current_run_id.set(run_id)
+    callbacks = _trace_callbacks(run_id, pep_id_list, target)
+
     graph = build_graph()
     final_state = graph.invoke(
         {
@@ -70,7 +77,7 @@ def run_cmd(pep_ids: str, connector: str, package: str, package_version: str | N
             "test_retry_budget": 2,
             "test_acceptance_threshold": 0.75,
         },
-        config={"configurable": {"thread_id": run_id}},
+        config={"configurable": {"thread_id": run_id}, "callbacks": callbacks},
     )
 
     report = final_state.get("report")
@@ -85,10 +92,13 @@ def run_cmd(pep_ids: str, connector: str, package: str, package_version: str | N
 def resume_cmd(run_id: str) -> None:
     from releaselens.graph import build_graph
 
+    current_run_id.set(run_id)
+    callbacks = _trace_callbacks(run_id, [], None)
+
     graph = build_graph()
     final_state = graph.invoke(
         None,
-        config={"configurable": {"thread_id": run_id}},
+        config={"configurable": {"thread_id": run_id}, "callbacks": callbacks},
     )
     report = final_state.get("report") if final_state else None
     if report is None:
@@ -105,6 +115,14 @@ def eval_cmd(runs: int) -> None:
         click.echo("No fixtures present (data/fixtures/*.yaml). Eval is a stub in this scaffold.")
         return
     click.echo(f"Eval stub: would run {runs} run(s) against {fixtures_dir}.")
+
+
+def _trace_callbacks(run_id: str, pep_ids: list[str], target: TargetRef | None) -> list:
+    tags = [f"pep:{p}" for p in pep_ids]
+    if target is not None:
+        tags.append(f"target:{target.package}")
+    handler = get_callback_handler(run_id, tags=tags)
+    return [handler] if handler is not None else []
 
 
 def _normalise_pep_id(raw: str) -> str:
