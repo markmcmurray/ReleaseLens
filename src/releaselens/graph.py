@@ -125,20 +125,33 @@ def _fanout_impact(state: PipelineState) -> list[Send]:
 # ---- Conditional edges (architecture.md §7.3) -----------------------------------
 
 
-def _after_static(state: PipelineState) -> str:
-    threshold = state.get("confidence_threshold", 0.8)
-    latest = _latest_evidence_by_method(state, "static")
-    if latest and latest.confidence >= threshold:
-        return "evidence_aggregate"
-    return "evidence_changelog"
+def _after_static(state: PipelineState) -> Send:
+    return _escalate_or_aggregate(state, source_method="static", next_node="evidence_changelog")
 
 
-def _after_changelog(state: PipelineState) -> str:
+def _after_changelog(state: PipelineState) -> Send:
+    return _escalate_or_aggregate(state, source_method="changelog", next_node="evidence_probe")
+
+
+def _escalate_or_aggregate(state: PipelineState, *, source_method: str, next_node: str) -> Send:
+    """Route per-shard from an evidence node to its escalation target.
+
+    String-returning conditional edges drop the Send payload that launched
+    the source node, so downstream nodes lose (feature, tool) context. We
+    rebuild the shard payload from the most recent evidence record of the
+    source method — that record was just added by the shard whose routing
+    we're computing. If confidence cleared the threshold, hand off to
+    aggregate (state-driven, payload unused).
+    """
     threshold = state.get("confidence_threshold", 0.8)
-    latest = _latest_evidence_by_method(state, "changelog")
-    if latest and latest.confidence >= threshold:
-        return "evidence_aggregate"
-    return "evidence_probe"
+    latest = _latest_evidence_by_method(state, source_method)
+    if latest is None or latest.confidence >= threshold:
+        return Send("evidence_aggregate", {})
+    feature = next(
+        (f for f in state.get("features", []) if f.id == latest.feature_id),
+        None,
+    )
+    return Send(next_node, {"feature": feature, "tool": latest.tool})
 
 
 def _latest_evidence_by_method(state: PipelineState, method: str) -> Any:
