@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from datetime import UTC, datetime
 from typing import Literal, TypedDict
 
@@ -119,13 +120,33 @@ def evidence_static(shard: _Shard) -> dict:
 
     source_dir = get_source_dir(tool)
     candidates = _derive_candidates(feature)
-    hits = _gather_hits(candidates, source_dir) if candidates else []
+
+    in_stub_mode = os.environ.get("RELEASELENS_LLM_MODE") == "stub"
+    real_search_available = (
+        os.environ.get("RELEASELENS_RIPGREP_MODE", "real") != "real"
+        or (shutil.which("rg") is not None and source_dir.is_dir())
+    )
+    hits = (
+        _gather_hits(candidates, source_dir)
+        if candidates and real_search_available
+        else []
+    )
 
     # Stub LLM mode is the smoke-test path. Short-circuit with a canned
     # high-confidence verdict so the escalation ladder doesn't fall through
     # to the still-stubbed downstream nodes (which crash on empty shards).
-    if os.environ.get("RELEASELENS_LLM_MODE") == "stub":
+    if in_stub_mode:
         return _stub_evidence(feature_id, tool, hits, source_dir)
+
+    if not real_search_available:
+        reason = "rg binary not on PATH" if shutil.which("rg") is None else f"missing source tree {source_dir}"
+        return _evidence(
+            feature_id,
+            tool,
+            found=False,
+            confidence=0.0,
+            notes=f"static search skipped: {reason}",
+        )
 
     if not candidates:
         return _evidence(feature_id, tool, found=False, confidence=0.0,
@@ -208,9 +229,10 @@ def _gather_hits(candidates: list[str], root) -> list[tuple[str, ripgrep.Ripgrep
             results = ripgrep.search(
                 cand, root, file_globs=_FILE_GLOBS, max_results=_MAX_HITS_PER_CANDIDATE
             )
-        except (RuntimeError, LookupError):
-            # LookupError covers ripgrep's StubNotRegistered when a test
-            # registers some but not all candidate tokens.
+        except (RuntimeError, LookupError, FileNotFoundError):
+            # LookupError covers StubNotRegistered when a test registers
+            # some but not all candidate tokens; FileNotFoundError covers
+            # the rg binary missing on PATH at subprocess spawn time.
             continue
         for hit in results:
             out.append((cand, hit))
