@@ -9,9 +9,10 @@ authors = [{ name = "Mark McMurray" }]
 dependencies = [
     "langgraph>=0.2.50",
     "langgraph-checkpoint-sqlite>=2.0.0",
+    "langchain>=0.3,<1.0",
     "langchain-aws>=0.2.0",
     "litellm>=1.50.0",
-    "langfuse>=2.50.0",
+    "langfuse>=2.50,<3.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "click>=8.1",
