@@ -35,40 +35,52 @@ _REPORTS_DIR = Path("reports")
 
 
 def report_render(state: _State) -> dict:
-    _ = get_model_for(__name__)
-    env = Environment(
-        loader=FileSystemLoader(_TEMPLATES_DIR),
-        autoescape=select_autoescape(),
-        keep_trailing_newline=True,
-    )
-    template = env.get_template("report.md.j2")
+    # run_id, pep_ids, target are graph-invocation inputs — required at this point.
+    # Lists/dicts that fan-in producers may have left empty are read with .get default.
+    run_id = state["run_id"]
+    pep_ids = state["pep_ids"]
+    target = state["target"]
+    features = state.get("features", [])
+    pep_ids_list = list(pep_ids)
 
-    run_id = state.get("run_id", "unknown-run")
+    _ = get_model_for(__name__)
+    template = _jinja_env().get_template("report.md.j2")
+
     out_dir = _REPORTS_DIR / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "report.md"
 
     rendered = template.render(
         run_id=run_id,
-        pep_ids=state.get("pep_ids", []),
-        target=state.get("target"),
-        features=state.get("features", []),
+        pep_ids=pep_ids_list,
+        target=target,
+        features=features,
         matrices=state.get("matrices", {}),
         verifications=state.get("verifications", []),
         impacts=state.get("impacts", []),
     )
     out_path.write_text(rendered)
 
-    summary = ReportSummary(
-        feature_count=len(state.get("features", [])),
-        pep_count=len(state.get("pep_ids", [])),
-    )
     report = FeatureReport(
         run_id=run_id,
-        pep_ids=state.get("pep_ids", []),
-        target=state.get("target") or TargetRef(connector="stub", package="stub"),
+        pep_ids=pep_ids_list,
+        target=target,
         markdown_path=out_path,
-        summary=summary,
+        summary=ReportSummary(feature_count=len(features), pep_count=len(pep_ids_list)),
         generated_at=datetime.now(UTC),
     )
     return {"report": report}
+
+
+def _jinja_env() -> Environment:
+    global _ENV
+    if _ENV is None:
+        _ENV = Environment(
+            loader=FileSystemLoader(_TEMPLATES_DIR),
+            autoescape=select_autoescape(),
+            keep_trailing_newline=True,
+        )
+    return _ENV
+
+
+_ENV: Environment | None = None

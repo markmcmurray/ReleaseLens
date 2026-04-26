@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.constants import END, START
@@ -31,9 +31,10 @@ from releaselens.nodes.pep_ingest import pep_ingest
 from releaselens.nodes.report_render import report_render
 from releaselens.nodes.test_author import test_author
 from releaselens.nodes.verify import verify
+from releaselens.schemas import Tool
 from releaselens.state import PipelineState
 
-_TOOLS: tuple[str, ...] = ("warehouse", "pip", "uv")
+_TOOLS: tuple[Tool, ...] = get_args(Tool)
 _DEFAULT_DB_PATH = Path(".releaselens/checkpoints.db")
 
 
