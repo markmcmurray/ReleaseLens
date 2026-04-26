@@ -1,14 +1,16 @@
-"""LiteLLM call wrapper with cassette-based record/replay (architecture.md §6, §11.6).
+"""LiteLLM call wrapper with cassette-based record/replay (architecture.md §11.6.1).
 
 Tests must be deterministic (AGENTS.md). Real LLM calls are recorded to
-``tests/cassettes/<node_name>/<sha256(request)>.json`` once and replayed
-thereafter — replay is the default so unit tests never reach Bedrock.
+``$RELEASELENS_CASSETTES_DIR/<node_name>/<sha256(request)>.json`` (default
+``tests/cassettes``) once and replayed thereafter — replay is the default so
+unit tests never reach Bedrock.
 
 Modes via ``RELEASELENS_LLM_MODE``:
 - ``replay`` (default): cassette must exist; missing cassette raises
 - ``record-missing``: replay when cassette exists, otherwise call live and write
 - ``record``: always call live and overwrite the cassette
 - ``live``: always call live, never read or write cassettes
+- ``stub``: return a per-node response registered via :func:`register_stub`
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +29,7 @@ from releaselens.routing import get_model_for
 
 CassetteMode = Literal["replay", "record-missing", "record", "live", "stub"]
 
-_CASSETTE_DIR = Path("tests/cassettes")
+_DEFAULT_CASSETTE_DIR = "tests/cassettes"
 _VALID_MODES: tuple[CassetteMode, ...] = (
     "replay",
     "record-missing",
@@ -33,6 +37,8 @@ _VALID_MODES: tuple[CassetteMode, ...] = (
     "live",
     "stub",
 )
+_JSON_FENCE_OPEN = re.compile(r"^```(?:json)?\s*\n")
+_JSON_FENCE_CLOSE = re.compile(r"\n```\s*$")
 
 
 class CassetteMissing(RuntimeError):
@@ -69,7 +75,7 @@ def call(node_name: str, *, system: str, user: str) -> str:
         {"role": "user", "content": user},
     ]
     key = _cassette_key(cfg.model, messages, cfg.temperature, cfg.max_tokens)
-    cassette_path = _CASSETTE_DIR / node_name / f"{key}.json"
+    cassette_path = _cassette_dir() / node_name / f"{key}.json"
 
     if mode in ("replay", "record-missing") and cassette_path.exists():
         return _read_cassette(cassette_path)
@@ -90,6 +96,24 @@ def call(node_name: str, *, system: str, user: str) -> str:
     if mode in ("record", "record-missing"):
         _write_cassette(cassette_path, cfg.model, messages, text)
     return text
+
+
+def strip_json_fences(text: str) -> str:
+    """Strip ```json ... ``` wrappers some models add around JSON output.
+
+    Lifted to llm.py because every JSON-out LLM node needs this; keeping it
+    per-node would invite drift on the regex.
+    """
+    text = text.strip()
+    if not text.startswith("```"):
+        return text
+    text = _JSON_FENCE_OPEN.sub("", text)
+    text = _JSON_FENCE_CLOSE.sub("", text)
+    return text
+
+
+def _cassette_dir() -> Path:
+    return Path(os.environ.get("RELEASELENS_CASSETTES_DIR", _DEFAULT_CASSETTE_DIR))
 
 
 def _resolve_mode() -> CassetteMode:
@@ -117,10 +141,24 @@ def _read_cassette(path: Path) -> str:
 
 
 def _write_cassette(path: Path, model: str, messages: list[dict], response: str) -> None:
+    """Atomic write: render to a sibling tempfile, then os.replace into place.
+
+    A direct write_text can leave a partial cassette if the process is killed
+    mid-write — replay would then read truncated JSON and either crash or
+    (worse) silently produce wrong test outputs. Atomic rename eliminates
+    the partial-state window.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "model": model,
-        "messages": messages,
-        "response": response,
-    }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    payload = {"model": model, "messages": messages, "response": response}
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=path.name + ".",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp.write(rendered)
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)

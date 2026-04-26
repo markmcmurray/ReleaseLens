@@ -110,22 +110,13 @@ def feature_extract(shard: _Shard) -> dict:
 
     try:
         raw = llm.call("feature_extract", system=_SYSTEM_PROMPT, user=user_prompt)
-        extraction = _ExtractionOutput.model_validate_json(_strip_json_fences(raw))
+        extraction = _ExtractionOutput.model_validate_json(llm.strip_json_fences(raw))
     except (ValidationError, ValueError, json.JSONDecodeError, llm.CassetteMissing) as exc:
         return _error(pep_id, f"feature_extract failed: {exc}")
 
     pep_status = _detect_pep_status(source.body)
     features = [_to_feature(pep_id, ef, pep_status) for ef in extraction.features]
     return {"features": features}
-
-
-def _strip_json_fences(text: str) -> str:
-    """Models occasionally wrap JSON in ```json fences. Strip them if present."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*\n", "", text)
-        text = re.sub(r"\n```\s*$", "", text)
-    return text
 
 
 def _detect_pep_status(body: str) -> Literal["Draft", "Accepted", "Final", "Withdrawn", "Rejected"]:
