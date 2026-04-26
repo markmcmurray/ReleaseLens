@@ -40,7 +40,7 @@ def test_loop_iteration_pipes_prior_feedback_into_prompt(
     monkeypatch.setenv("RELEASELENS_LLM_MODE", "stub")
     captured: dict[str, str] = {}
 
-    def fake_call(node_name: str, *, system: str, user: str) -> str:
+    def fake_call(node_name: str, *, system: str, user: str, metadata: dict | None = None) -> str:
         captured["user"] = user
         return llm._STUB_RESPONSES[node_name]
 
