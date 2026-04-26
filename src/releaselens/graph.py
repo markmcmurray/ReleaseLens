@@ -30,6 +30,7 @@ from releaselens.nodes.matrix_build import matrix_build
 from releaselens.nodes.pep_ingest import pep_ingest
 from releaselens.nodes.report_render import report_render
 from releaselens.nodes.test_author import test_author
+from releaselens.nodes.test_authoring_aggregate import test_authoring_aggregate
 from releaselens.nodes.verify import verify
 from releaselens.schemas import Tool
 from releaselens.state import PipelineState
@@ -54,7 +55,15 @@ def _fanout_feature_extract(state: PipelineState) -> list[Send]:
     ]
 
 
-def _fanout_test_author(state: PipelineState) -> list[Send]:
+def _fanout_test_authoring(state: PipelineState) -> list[Send]:
+    """Fan out one Send per spec claim across all features.
+
+    Testable claims start the test-author/critic loop at iteration 0.
+    Non-testable claims skip the loop entirely and go straight to the
+    aggregator with status="unverifiable" — architecture §7.3.1 mandates
+    this terminal state. The aggregator handles the empty case naturally
+    (no shards, no results).
+    """
     sends: list[Send] = []
     for feature in state.get("features", []):
         for claim in feature.spec_claims:
@@ -62,27 +71,23 @@ def _fanout_test_author(state: PipelineState) -> list[Send]:
                 sends.append(
                     Send(
                         "test_author",
-                        {"claim_id": claim.id, "iteration": 0},
+                        {
+                            "claim_id": claim.id,
+                            "claim_text": claim.claim_text,
+                            "claim_type": claim.claim_type,
+                            "pep_section_ref": claim.pep_section_ref,
+                            "iteration": 0,
+                        },
                     )
                 )
-    return sends or [Send("test_author_noop", {})]
-
-
-def _fanout_critic(state: PipelineState) -> list[Send]:
-    # Pair each emitted DifferentialTest with its claim for critic shard input.
-    tests = state.get("differential_tests", [])
-    return [
-        Send(
-            "critic",
-            {
-                "test_id": t.id,
-                "claim_id": t.claim_id,
-                "iteration": t.iteration,
-                "test": t,
-            },
-        )
-        for t in tests
-    ]
+            else:
+                sends.append(
+                    Send(
+                        "test_authoring_aggregate",
+                        {"claim_id": claim.id, "status": "unverifiable"},
+                    )
+                )
+    return sends
 
 
 def _fanout_evidence(state: PipelineState) -> list[Send]:
@@ -163,8 +168,8 @@ def build_graph(*, db_path: Path | None = None):
     g.add_node("feature_extract", feature_extract)
     g.add_node("after_feature_extract", _identity)
     g.add_node("test_author", test_author)
-    g.add_node("test_author_noop", _identity)
     g.add_node("critic", critic)
+    g.add_node("test_authoring_aggregate", test_authoring_aggregate)
     g.add_node("after_test_authoring", _identity)
     g.add_node("evidence_static", evidence_static)
     g.add_node("evidence_changelog", evidence_changelog)
@@ -184,15 +189,17 @@ def build_graph(*, db_path: Path | None = None):
     g.add_conditional_edges("after_pep_ingest", _fanout_feature_extract, ["feature_extract"])
     g.add_edge("feature_extract", "after_feature_extract")
 
-    # Test-author/critic loop. Stub critic always accepts on iteration 0.
+    # Test-author/critic loop (architecture.md §7.3.1, ADR-0007).
+    # author and critic both return Command(goto=Send(...)) so the loop
+    # iteration and terminal routing happen at node-level — no _fanout_critic
+    # router is needed. Send targets must be declared in the conditional-edges
+    # destination list so LangGraph knows the topology.
     g.add_conditional_edges(
         "after_feature_extract",
-        _fanout_test_author,
-        ["test_author", "test_author_noop"],
+        _fanout_test_authoring,
+        ["test_author", "test_authoring_aggregate"],
     )
-    g.add_conditional_edges("test_author", _fanout_critic, ["critic"])
-    g.add_edge("critic", "after_test_authoring")
-    g.add_edge("test_author_noop", "after_test_authoring")
+    g.add_edge("test_authoring_aggregate", "after_test_authoring")
 
     # Evidence pipeline.
     g.add_conditional_edges("after_test_authoring", _fanout_evidence, ["evidence_static"])
