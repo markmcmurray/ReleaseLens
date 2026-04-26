@@ -16,6 +16,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
+from releaselens.observability.langfuse import tool_span
 from releaselens.tools import _stub_mode
 
 TOOL = "github"
@@ -44,19 +45,20 @@ def search_commits(
 
     from itertools import islice
 
-    gh = _client()
-    qualifiers = f"repo:{repo} {query}"
-    if since is not None:
-        qualifiers += f" committer-date:>={since.isoformat()}"
-    return [
-        CommitRef(
-            sha=c.sha,
-            message=c.commit.message,
-            committed_at=c.commit.committer.date,
-            url=c.html_url,
-        )
-        for c in islice(gh.search_commits(qualifiers), limit)
-    ]
+    with tool_span("tool.github", op="search_commits", repo=repo, query=query):
+        gh = _client()
+        qualifiers = f"repo:{repo} {query}"
+        if since is not None:
+            qualifiers += f" committer-date:>={since.isoformat()}"
+        return [
+            CommitRef(
+                sha=c.sha,
+                message=c.commit.message,
+                committed_at=c.commit.committer.date,
+                url=c.html_url,
+            )
+            for c in islice(gh.search_commits(qualifiers), limit)
+        ]
 
 
 def list_releases(repo: str, *, limit: int = 50) -> list[ReleaseRef]:
@@ -66,17 +68,18 @@ def list_releases(repo: str, *, limit: int = 50) -> list[ReleaseRef]:
 
     from itertools import islice
 
-    gh = _client()
-    repository = gh.get_repo(repo)
-    return [
-        ReleaseRef(
-            tag=r.tag_name,
-            name=r.title,
-            published_at=r.published_at,
-            url=r.html_url,
-        )
-        for r in islice(repository.get_releases(), limit)
-    ]
+    with tool_span("tool.github", op="list_releases", repo=repo):
+        gh = _client()
+        repository = gh.get_repo(repo)
+        return [
+            ReleaseRef(
+                tag=r.tag_name,
+                name=r.title,
+                published_at=r.published_at,
+                url=r.html_url,
+            )
+            for r in islice(repository.get_releases(), limit)
+        ]
 
 
 def get_release_notes(repo: str, tag: str) -> str:
@@ -84,9 +87,10 @@ def get_release_notes(repo: str, tag: str) -> str:
     if _stub_mode.mode_for(TOOL) == "stub":
         return _stub_mode.lookup_stub(TOOL, ("get_release_notes", repo, tag))
 
-    gh = _client()
-    repository = gh.get_repo(repo)
-    return repository.get_release(tag).body or ""
+    with tool_span("tool.github", op="get_release_notes", repo=repo, tag=tag):
+        gh = _client()
+        repository = gh.get_repo(repo)
+        return repository.get_release(tag).body or ""
 
 
 def register_stub(call: str, *args: Hashable, value) -> None:

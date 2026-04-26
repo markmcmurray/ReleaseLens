@@ -21,6 +21,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from releaselens.observability.langfuse import tool_span
 from releaselens.tools import _stub_mode
 
 TOOL = "uv_sandbox"
@@ -49,14 +50,15 @@ class Sandbox:
         first = bin_dir / cmd[0]
         resolved = [str(first)] + cmd[1:] if first.exists() else cmd
 
-        proc = subprocess.run(
-            resolved,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-            env=_env_for(self._venv_path),
-        )
+        with tool_span("tool.uv_sandbox", op="run", packages=list(self._packages), cmd=cmd):
+            proc = subprocess.run(
+                resolved,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+                env=_env_for(self._venv_path),
+            )
         return SandboxResult(stdout=proc.stdout, stderr=proc.stderr, exit_code=proc.returncode)
 
 

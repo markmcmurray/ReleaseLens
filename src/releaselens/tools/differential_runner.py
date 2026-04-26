@@ -25,6 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from releaselens.observability.langfuse import tool_span
 from releaselens.schemas import DifferentialTest
 from releaselens.tools import _stub_mode, ripgrep, uv_sandbox
 
@@ -49,7 +50,13 @@ def run(test: DifferentialTest, *, search_root: Path | str | None = None) -> Dif
         return DifferentialResult(
             test_id=test.id, outcome="error", detail=f"unknown test_kind {test.test_kind!r}"
         )
-    return executor(test, search_root)
+    with tool_span(
+        "tool.differential_runner",
+        executor=test.test_kind,
+        test_id=test.id,
+        claim_id=test.claim_id,
+    ):
+        return executor(test, search_root)
 
 
 def register_stub(test_id: str, result: DifferentialResult) -> None:

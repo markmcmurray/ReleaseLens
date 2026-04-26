@@ -16,6 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from releaselens.observability.langfuse import tool_span
 from releaselens.peps.rst import split_sections
 from releaselens.tools import _stub_mode
 
@@ -52,9 +53,10 @@ class RagStore:
         if _stub_mode.mode_for(TOOL) == "stub":
             return list(_stub_mode.lookup_stub(TOOL, ("query", collection, q, k)))
 
-        coll = self._collection(collection)
-        embedding = self._embed([q])[0]
-        result = coll.query(query_embeddings=[embedding], n_results=k)
+        with tool_span("tool.rag", op="query", collection=collection, k=k):
+            coll = self._collection(collection)
+            embedding = self._embed([q])[0]
+            result = coll.query(query_embeddings=[embedding], n_results=k)
         ids = result.get("ids", [[]])[0]
         docs = result.get("documents", [[]])[0]
         metas = result.get("metadatas", [[]])[0]
@@ -91,10 +93,11 @@ class RagStore:
             metas.append(meta)
         if not ids:
             return
-        embeddings = self._embed(docs)
-        self._collection(collection).upsert(
-            ids=ids, documents=docs, metadatas=metas, embeddings=embeddings
-        )
+        with tool_span("tool.rag", op="ingest", collection=collection, n_items=len(ids)):
+            embeddings = self._embed(docs)
+            self._collection(collection).upsert(
+                ids=ids, documents=docs, metadatas=metas, embeddings=embeddings
+            )
 
     def _collection(self, name: Collection):
         if self._client is None:

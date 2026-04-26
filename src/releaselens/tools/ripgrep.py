@@ -16,6 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from releaselens.observability.langfuse import tool_span
 from releaselens.tools import _stub_mode
 
 TOOL = "ripgrep"
@@ -44,35 +45,36 @@ def search(
         cmd.extend(["--glob", glob])
 
     hits: list[RipgrepHit] = []
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") != "match":
-                continue
-            data = event["data"]
-            hits.append(
-                RipgrepHit(
-                    path=data["path"]["text"],
-                    line_no=data["line_number"],
-                    line_text=data["lines"]["text"].rstrip("\n"),
+    with tool_span("tool.ripgrep", pattern=pattern, root=root_str, file_globs=file_globs or []):
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") != "match":
+                    continue
+                data = event["data"]
+                hits.append(
+                    RipgrepHit(
+                        path=data["path"]["text"],
+                        line_no=data["line_number"],
+                        line_text=data["lines"]["text"].rstrip("\n"),
+                    )
                 )
-            )
-            if len(hits) >= max_results:
-                proc.terminate()
-                break
-    finally:
-        proc.stdout.close() if proc.stdout else None
-        rc = proc.wait()
-    if rc not in (0, 1) and len(hits) < max_results:  # 1 = no matches; >1 = real error
-        stderr = proc.stderr.read() if proc.stderr else ""
-        raise RuntimeError(f"rg failed (exit {rc}): {stderr.strip()}")
+                if len(hits) >= max_results:
+                    proc.terminate()
+                    break
+        finally:
+            proc.stdout.close() if proc.stdout else None
+            rc = proc.wait()
+        if rc not in (0, 1) and len(hits) < max_results:  # 1 = no matches; >1 = real error
+            stderr = proc.stderr.read() if proc.stderr else ""
+            raise RuntimeError(f"rg failed (exit {rc}): {stderr.strip()}")
     return hits
 
 
