@@ -571,9 +571,11 @@ Tools used by nodes beyond LLMs. The pattern: each tool replaces an LLM call whe
 | **GitHub API** (PyGithub) | `evidence_changelog` | Commit archaeology: `git log --grep="PEP-691"`, release-tag enumeration, when-did-this-land queries. Returns structured data the LLM doesn't have to invent. Authenticated via `GITHUB_TOKEN` from Secrets Manager in production; from env locally. |
 | **PEP corpus RAG** | `feature_extract`, `verify` | Local ChromaDB embedding store over the curated PEP set + their referenced PEPs. Lets `feature_extract` pull cross-references (PEP 691 references 503) without re-fetching them mid-prompt. Lets `verify` cite the exact spec passage when noting a misalignment. Embeddings: Bedrock Titan (cheap, in-region). |
 | **Connector docs RAG** | `impact_scope` | Embeddings over the registry connector's docs + the target package's README/docs. Gives `impact_scope` grounded "what does this package currently do" context without dumping the whole repo into the prompt. Same Chroma store, separate collection. |
-| **Differential test runner** | `evidence_probe` | Executes the `DifferentialTest`s produced by the test-author/critic loop. Three executors keyed on `test_kind`:<br>• `static_signature` → ripgrep + Python `importlib`/`inspect` resolution<br>• `behavioural_probe` → invokes `pip` / `uv` against a controlled fixture index in a `uv venv` sandbox<br>• `metadata_assertion` → HTTP GET against the registry, JSON path assertion<br>Returns structured pass/fail/error. **No LLM in this path** — that's the point. |
-| **`uv venv` sandbox** | differential test runner (`behavioural_probe`) | Isolated, pinned-version venv per probe run. Tears down after each. Prevents cross-test contamination. `uv` chosen over `virtualenv` because it's one of the tools under test — using it as the sandbox runner is also a smoke test on the runner host. |
+| **Differential test runner** | `evidence_probe` | Executes the `DifferentialTest`s produced by the test-author/critic loop. Three executors keyed on `test_kind`:<br>• `static_signature` → ripgrep + Python `importlib`/`inspect` resolution<br>• `behavioural_probe` → invokes `pip` / `uv` against a controlled fixture index, via the `uv venv` sandbox wrapper below<br>• `metadata_assertion` → HTTP GET against the registry, JSON path assertion<br>Returns structured pass/fail/error. **No LLM in this path** — that's the point. |
+| **`uv venv` sandbox** | differential test runner (`behavioural_probe`); reusable by future probe nodes | Lifecycle wrapper around `uv venv`: create isolated venv, install pinned package versions, run a command, capture stdout/stderr/exit code, teardown. Context-manager API (`with sandbox(packages) as sbx: sbx.run(cmd)`). `uv` chosen over `virtualenv` because it's one of the tools under test — using it as the sandbox runner is also a smoke test on the runner host. Lives at `src/releaselens/tools/uv_sandbox.py`. |
 | **SQLite (LangGraph `SqliteSaver`)** | graph runtime | Already covered in §13. Listed here for completeness — it's the durable-state tool. |
+
+**Stub-mode parity across tools.** Every wrapper module under `src/releaselens/tools/` exposes a `stub` mode in addition to its real mode, selected by a uniform env-var convention: `RELEASELENS_<TOOL>_MODE` ∈ `{real, stub}`. Default is `real` in CLI runs; `tests/conftest.py` autouse-forces `stub` so unit and integration tests stay infra-free per AGENTS.md. Stub mode returns deterministic synthetic outputs that satisfy the same return type as real mode — no network, no subprocess, no disk writes outside a tmp dir. Unregistered stub keys raise `StubNotRegistered` rather than returning empty results, because silent zero-result replays mask bugs in tests. The earlier `RELEASELENS_PROBE_MODE=stub` (§7.3.2) is folded into this convention as `RELEASELENS_DIFFERENTIAL_RUNNER_MODE=stub`; the legacy var is honoured as a backward-compat alias until v2.
 
 **Determinism story.** The differential test runner is the source of hard pass/fail signals. Probe outputs are not LLM-judged; they're tool outputs the LLM only *interprets when assigning confidence*. That's the line between "LLM reasoning over deterministic ground truth" and "LLM-as-judge" — the former is fine, the latter is forbidden on the success path (ADR-0005).
 
@@ -1006,9 +1008,11 @@ releaselens/
 │   │   ├── report_render.py
 │   │   └── joins.py                      # §7.1 — after_pep_ingest, after_feature_extract
 │   ├── tools/                    # §9 — non-LLM tools
+│   │   ├── _stub_mode.py         # §9 — uniform stub-mode helper for all wrappers
 │   │   ├── ripgrep.py
 │   │   ├── github.py             # commit archaeology
 │   │   ├── rag.py                # PEP corpus + connector docs
+│   │   ├── uv_sandbox.py         # §9 — uv venv lifecycle wrapper
 │   │   └── differential_runner.py  # executes DifferentialTests
 │   ├── eval/                     # §11
 │   │   ├── __init__.py
