@@ -107,6 +107,8 @@ class Feature(BaseModel):
     introduced_version_claim: str | None   # what the PEP says, if anything
 ```
 
+**Stable ID generation rule.** `Feature.id = f"{pep_id.lower()}.{slug(title)}"` where `slug` lowercases, replaces any run of non-`[a-z0-9]` characters with a single `-`, and strips leading/trailing `-`. Same `(pep_id, title)` always yields the same `id`. The eval set arithmetic in §11.3 depends on this — UUIDs or hash-based IDs would silently break reproducibility across runs. If two Features collide on slug (rare, but a real possibility), the extractor must rename one of them.
+
 ### 4.2 `SpecClaim` — a testable assertion lifted from the PEP
 
 ```python
@@ -118,6 +120,8 @@ class SpecClaim(BaseModel):
     testable: bool             # if False, verification is descriptive only
     pep_section_ref: str       # e.g. "PEP-691#specification.endpoints"
 ```
+
+**Stable ID generation rule.** `SpecClaim.id = f"{feature_id}.claim-{NN:02d}"` where `NN` is the 1-based source-order index of the claim within its parent Feature's `spec_claims` list. Re-extracting from the same PEP body must produce the same ordering — extractors should preserve PEP-text order rather than re-ranking by perceived importance.
 
 ### 4.3 `ImplementationEvidence` — one per (Feature × Tool × Method)
 
@@ -413,7 +417,9 @@ nodes:
 
 **Loading:** `routing.py` exposes `get_model_for(node_name) -> LiteLLMConfig`. Each node calls this; never hardcodes. Swap models by editing YAML, restart the run.
 
-**Pinning:** exact Bedrock model IDs (`anthropic.claude-sonnet-4-5-YYYYMMDD-v1:0`) live in `config/model_pins.yaml` and are referenced by the family aliases above. Reproducibility for eval runs depends on this — pin before benchmarking.
+**Pinning:** exact Bedrock model IDs live in `config/model_pins.yaml` and are referenced by the family aliases above. `routing.py` resolves the alias through pins at lookup time. A missing pin **raises** rather than silently falling back to the alias — reproducibility for eval runs depends on this, and a typo in routing.yaml that quietly hits the wrong model is exactly the kind of error a fallback would mask. Pin before benchmarking.
+
+**Bedrock model availability.** Current-gen Claude models (Sonnet 4.5, Haiku 4.5, Opus 4.x) are not available as `ON_DEMAND` base IDs in regional endpoints — only via cross-region inference profiles whose IDs are prefixed with the region cluster (`eu.*` for European deployments, `us.*` for US, `global.*` for cross-cluster). Pin entries for current-gen models therefore look like `bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0`, not the unprefixed Bedrock-foundation form. Older Claude 3.x is the exception — it does have ON_DEMAND base IDs. Verify with `aws bedrock list-inference-profiles --region <region>` before pinning.
 
 ---
 
@@ -465,6 +471,8 @@ flowchart TD
 | `impact_scope` | per `feature` | One scoping reasoning pass per atomic feature |
 
 For ~5 features per PEP × 3 PEPs × 3 tools = ~45 parallel evidence pipelines at peak. LiteLLM concurrency limits and Bedrock TPS quotas are the real ceiling — set `max_concurrency=10` on the LangGraph compile call as a starting point and tune from Langfuse traces.
+
+**Send payload convention.** Send shards carry the domain objects the receiving node needs, not just identifier keys. `feature_extract` receives `{"pep_id": ..., "source": PEPSource}`, `verify` receives `{"feature_id": ..., "claim_ids": [...]}`, `impact_scope` receives `{"feature_id": ..., "target": TargetRef}`, and so on. The fan-out router function (which sees full state) is responsible for resolving the necessary objects from state into each shard payload. Receiving nodes never re-read from state or re-fetch from disk — both would defeat the per-shard isolation that makes the topology testable in isolation.
 
 ### 7.3 Conditional edges
 
@@ -759,6 +767,26 @@ Single-run is the default. All nodes pin `temperature=0.0` (already set in routi
 
 Reported numbers are mean of 3 runs; the default command runs once. ±2% variance is typical.
 
+### 11.6.1 Cassette record/replay for LLM-bearing tests
+
+Unit and integration tests must be deterministic and infra-free (AGENTS.md). Every LLM call therefore goes through `releaselens.llm.call`, which records first-time responses to a cassette and replays them on subsequent runs. Tests never reach Bedrock unless explicitly recording.
+
+**Storage.** Cassettes live at `tests/cassettes/<node_name>/<key>.json`. The key is the first 16 hex chars of `sha256(json.dumps({"model", "messages", "temperature", "max_tokens"}, sort_keys=True))`. Same prompt + same model + same params → same cassette path → deterministic replay.
+
+**Modes** via `RELEASELENS_LLM_MODE`:
+
+| Mode | Behaviour |
+|---|---|
+| `replay` (default) | Cassette must exist; missing cassette raises `CassetteMissing`. Tests skip or fail loudly rather than silently calling Bedrock. |
+| `record-missing` | Replay if cassette exists; otherwise call Bedrock and write the cassette. The pragmatic dev mode. |
+| `record` | Always call Bedrock and overwrite the cassette. Use when a prompt change invalidates a stored response. |
+| `live` | Always call Bedrock, never read or write cassettes. Production CLI runs use this. |
+| `stub` | Return a per-node deterministic response registered via `llm.register_stub(node_name, response_json)`. Lets the smoke test exercise the full graph without cassettes or creds. Every LLM-bearing node must register a stub at module load. |
+
+**Recording lifecycle.** A new LLM-bearing node ships with a cassette captured once during development against the pinned model. The cassette is committed alongside the code. Subsequent test runs replay. Re-recording is required only when (a) the prompt changes, (b) the pinned model changes, or (c) the response Pydantic schema changes — each of which produces a new key and an explicit miss in CI.
+
+**Cost.** Recording is bounded by node count × PEP count × test count, run once per change. A single feature_extract recording on Sonnet against PEP-658 is ~$0.05; full-eval recording for v1 scope is single-digit dollars per refresh. CI never records.
+
 ### 11.7 What's NOT in v1
 
 Documented so it doesn't get dragged in:
@@ -878,7 +906,7 @@ Step Functions wraps multi-tenant runs (per-customer registry targets). DynamoDB
 - **Resumption:** `releaselens resume <run_id>` re-attaches and continues from the last checkpoint. Useful when a Bedrock 429 burst kills the run mid-fan-out.
 - **Production swap:** §12.4 — DynamoDB-backed custom saver. Same interface, different storage.
 
-PEP source caching is separate: `data/peps/PEP-XXX.rst` on disk, fetched once per run unless `--refresh-peps` is passed.
+PEP source caching is separate: `data/peps/PEP-XXX.rst` on disk, fetched once per run unless `--refresh-peps` is passed. The directory is overridable via `RELEASELENS_PEPS_DIR` so tests point at `tests/fixtures/peps/` without touching the dev cache. While the real fetcher is unimplemented, bundled fixtures under `tests/fixtures/peps/` are the dev source of truth — the CLI auto-copies them into `data/peps/` on first run so `releaselens run --pep-ids 658` works without manual setup. `data/peps/` itself is gitignored.
 
 ---
 
@@ -943,7 +971,10 @@ releaselens/
 │   ├── __init__.py
 │   ├── cli.py                    # `releaselens run`, `releaselens resume`, `releaselens eval`
 │   ├── state.py                  # PipelineState
-│   ├── routing.py                # LiteLLM gateway loader
+│   ├── routing.py                # LiteLLM gateway loader; resolves family aliases via model_pins.yaml
+│   ├── llm.py                    # §11.6.1 — call() wrapper with cassette record/replay
+│   ├── peps/
+│   │   └── rst.py                # RST section splitter (used by pep_ingest)
 │   ├── graph.py                  # LangGraph wiring
 │   ├── schemas/
 │   │   ├── __init__.py
@@ -991,7 +1022,10 @@ releaselens/
 │   ├── report.md.j2              # main run output
 │   └── eval.md.j2                # eval output
 ├── tests/
-│   ├── unit/                     # per-schema, per-node-with-mock-LLM
+│   ├── fixtures/
+│   │   └── peps/                 # bundled PEP RSTs (dev source of truth until fetcher lands)
+│   ├── cassettes/                # §11.6.1 — recorded LLM responses, keyed by request hash
+│   ├── unit/                     # per-schema, per-node, replay-cassette
 │   ├── integration/              # graph end-to-end with stubbed methods
 │   └── eval/                     # ground-truth comparison harness
 └── .releaselens/
