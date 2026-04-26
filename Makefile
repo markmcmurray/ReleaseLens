@@ -1,4 +1,4 @@
-.PHONY: setup demo eval lint test
+.PHONY: setup demo eval lint test langfuse-up langfuse-down
 
 setup:
 	uv sync --all-extras
@@ -15,3 +15,10 @@ lint:
 
 test:
 	uv run pytest
+
+langfuse-up:
+	cd infra/langfuse && [ -f .env ] || cp .env.example .env
+	cd infra/langfuse && docker compose up -d
+
+langfuse-down:
+	cd infra/langfuse && docker compose down

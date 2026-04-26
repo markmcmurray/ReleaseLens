@@ -57,8 +57,19 @@ def register_stub(node_name: str, response: str) -> None:
     _STUB_RESPONSES[node_name] = response
 
 
-def call(node_name: str, *, system: str, user: str) -> str:
-    """Call the LLM routed for ``node_name`` and return the raw response text."""
+def call(
+    node_name: str,
+    *,
+    system: str,
+    user: str,
+    metadata: dict | None = None,
+) -> str:
+    """Call the LLM routed for ``node_name`` and return the raw response text.
+
+    ``metadata`` is forwarded to LiteLLM in live mode, where the Langfuse
+    callback consumes ``trace_id``/``generation_name``/``tags`` keys to group
+    generations under the correct trace. Ignored in cassette/stub modes.
+    """
     mode = _resolve_mode()
 
     if mode == "stub":
@@ -85,12 +96,21 @@ def call(node_name: str, *, system: str, user: str) -> str:
             f"No cassette at {cassette_path}. Set RELEASELENS_LLM_MODE=record-missing to capture."
         )
 
+    from releaselens.observability.langfuse import current_run_id
+
+    trace_metadata = {
+        "trace_id": current_run_id.get(),
+        "generation_name": node_name,
+        "tags": [f"node:{node_name}"],
+        **(metadata or {}),
+    }
     response = litellm.completion(
         model=cfg.model,
         messages=messages,
         temperature=cfg.temperature,
         max_tokens=cfg.max_tokens,
         timeout=cfg.timeout_seconds,
+        metadata=trace_metadata,
     )
     text = response.choices[0].message.content or ""
     if mode in ("record", "record-missing"):

@@ -93,7 +93,12 @@ def test_author(shard: _LoopShard) -> Command:
     user_prompt = _build_user_prompt(shard)
 
     try:
-        raw = llm.call("test_author", system=_SYSTEM_PROMPT, user=user_prompt)
+        raw = llm.call(
+            "test_author",
+            system=_SYSTEM_PROMPT,
+            user=user_prompt,
+            metadata={"iteration": iteration, "claim_id": claim_id},
+        )
         authored = _AuthoredTest.model_validate_json(llm.strip_json_fences(raw))
     except (ValidationError, ValueError, json.JSONDecodeError, llm.CassetteMissing) as exc:
         return Command(
