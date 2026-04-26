@@ -146,7 +146,7 @@ RELEASELENS_LLM_MODE=record-missing \
 
 Default `replay` mode against a fresh PEP intentionally produces a noisy "trace full of `budget_exhausted`" — the cassettes under `tests/cassettes/` are sized to the unit tests, not to the real `pep_ingest` + `feature_extract` output, so prompt SHAs will not match. The graceful-degradation path is doing exactly what architecture §7.3.1 mandates; switch to `record-missing` once to capture the live cassettes.
 
-![`docs/screenshots/langfuse-trace.png`](docs/screenshots/langfuse-trace.png, "Example Langfuse Trace")
+[`docs/screenshots/langfuse-trace.png`](docs/screenshots/langfuse-trace.png, "Example Langfuse Trace")
 
 
 
