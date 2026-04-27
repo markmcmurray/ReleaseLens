@@ -149,6 +149,10 @@ def _run_behavioural_probe(
             ),
         )
     cmd = test.invocation.split()
+    if not cmd:
+        return DifferentialResult(
+            test_id=test.id, outcome="error", detail="invocation is empty"
+        )
     with uv_sandbox.sandbox(packages) as sbx:
         result = sbx.run(cmd)
     matches = test.expected.strip() in result.stdout

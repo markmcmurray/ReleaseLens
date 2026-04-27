@@ -16,11 +16,12 @@ context, so the loop can iterate without an intermediate fan-out router.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Literal, TypedDict
 
 from langgraph.types import Command, Send
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, model_validator
 
 from releaselens import llm
 from releaselens.schemas import DifferentialTest, ErrorRecord
@@ -34,34 +35,62 @@ claim correctly, FAIL if it does not. The test must distinguish conformant
 from non-conformant implementations — a test that passes on every tool, or
 fails on every tool, has no information value.
 
-Output a single test as JSON. The "test_kind" field is one of:
-- static_signature: tool exposes a function/class/attribute with a specific
-  shape. Verified by importing the tool and inspecting its public surface.
-- behavioural_probe: invoking the tool with controlled input produces specific
-  output. Verified by running the tool against a fixture in an isolated venv.
-- metadata_assertion: an HTTP GET against the registry returns a JSON or
-  header value matching a specific shape.
+The test will be EXECUTED by an automated runner. Your output must conform
+to the per-kind contract below — free-form English in the structured
+fields makes the test unrunnable and the critic will reject it.
 
-Pick the test_kind that gives the highest-coverage, most-deterministic signal
-for the claim at hand. Don't author a behavioural probe when a static signature
-check would do — simpler tests are better tests.
+test_kind contracts:
 
-The critic will score the test you produce on:
+1) static_signature
+   setup:       leave empty ("") — invocation carries the import target.
+   invocation:  exactly one ``module:attr`` import target.
+                Examples: "pip._internal.metadata:dist_info_metadata",
+                          "uv:__version__".
+   expected:    a short string the runner can match against
+                ``str(getattr(module, attr))``. Use "" if any resolution
+                counts as pass.
+
+2) behavioural_probe
+   setup:       NEWLINE-SEPARATED LIST OF PEP 508 REQUIREMENT SPECS, one
+                per line. Examples (each on its own line):
+                  pip==22.3
+                  uv>=0.4
+                NO English. NO descriptive sentences. The runner pipes
+                each line into ``uv pip install``.
+   invocation:  shell-style command run inside the sandbox, e.g.
+                "pip install --dry-run --report - some-pkg".
+   expected:    a substring the runner asserts is present in stdout.
+
+3) metadata_assertion
+   setup:       one short sentence describing the registry endpoint
+                under test (free-form OK here).
+   invocation:  EXACTLY of the form "GET <url> :: <jsonpath>", e.g.
+                "GET https://pypi.org/simple/foo/ :: $.meta.api_version".
+   expected:    the JSON value the path should resolve to (a literal
+                string, number, bool, or JSON-encoded object).
+
+Pick the test_kind that gives the highest-coverage, most-deterministic
+signal for the claim at hand. Prefer simpler kinds: don't author a
+behavioural probe when a static signature check would do.
+
+The critic will score on:
 - coverage: does this test exercise the claim's truth condition?
 - determinism: does it produce a binary signal under a clean fixture?
-
-Author with the rubric in mind.
+- format compliance: is each field shaped per the per-kind contract?
 
 Output VALID JSON only. No prose before or after. The JSON must match exactly:
 
 {
   "test_kind": "static_signature" | "behavioural_probe" | "metadata_assertion",
-  "setup": "Human-readable preconditions and fixture description",
-  "invocation": "Exact command, request, or code to run",
-  "expected": "What a conformant implementation produces",
+  "setup": "<per-kind contract>",
+  "invocation": "<per-kind contract>",
+  "expected": "<per-kind contract>",
   "differentiator": "What would distinguish a non-conformant implementation"
 }
 """
+
+_MODULE_ATTR_RE = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
+_GET_JSONPATH_RE = re.compile(r"^GET\s+\S+\s+::\s+\S+", re.IGNORECASE)
 
 
 class _AuthoredTest(BaseModel):
@@ -70,6 +99,53 @@ class _AuthoredTest(BaseModel):
     invocation: str
     expected: str
     differentiator: str
+
+    @model_validator(mode="after")
+    def _enforce_per_kind_contract(self) -> _AuthoredTest:
+        """Reject LLM outputs whose fields don't match the test_kind contract.
+
+        Rejection here surfaces as a ValidationError up to ``test_author``,
+        which converts it into an error record. Within the critic loop a
+        rejected attempt consumes one of the retry budget slots, so a
+        well-targeted prompt should still converge in 1–2 iterations.
+        """
+        kind = self.test_kind
+        if kind == "static_signature":
+            target = self.invocation.strip()
+            if not _MODULE_ATTR_RE.match(target):
+                raise ValueError(
+                    f"static_signature invocation must be 'module:attr'; got {target!r}"
+                )
+        elif kind == "behavioural_probe":
+            packages = [line.strip() for line in self.setup.splitlines() if line.strip()]
+            if not packages:
+                raise ValueError("behavioural_probe setup must list at least one PEP 508 spec")
+            for pkg in packages:
+                if not _is_pep508(pkg):
+                    raise ValueError(
+                        f"behavioural_probe setup line is not pip-installable: {pkg!r}"
+                    )
+            if not self.invocation.strip():
+                raise ValueError("behavioural_probe invocation must be a shell command")
+        elif kind == "metadata_assertion":
+            if not _GET_JSONPATH_RE.match(self.invocation.strip()):
+                raise ValueError(
+                    "metadata_assertion invocation must be 'GET <url> :: <jsonpath>'; "
+                    f"got {self.invocation!r}"
+                )
+        return self
+
+
+def _is_pep508(spec: str) -> bool:
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:
+        return " " not in spec
+    try:
+        Requirement(spec)
+        return True
+    except InvalidRequirement:
+        return False
 
 
 class _Shard(TypedDict):
@@ -193,9 +269,9 @@ def _build_user_prompt(shard: _LoopShard) -> str:
 _STUB_RESPONSE = json.dumps(
     {
         "test_kind": "static_signature",
-        "setup": "STUB setup.",
-        "invocation": "STUB invocation",
-        "expected": "STUB expected",
+        "setup": "",
+        "invocation": "json:dumps",
+        "expected": "",
         "differentiator": "STUB differentiator",
     }
 )
