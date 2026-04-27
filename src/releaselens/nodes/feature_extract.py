@@ -27,9 +27,13 @@ from releaselens.schemas import (
     PEPSource,
     SpecClaim,
 )
+from releaselens.tools.rag import RagStore
 
 _PEP_STATUS_PATTERN = re.compile(r"^Status:\s*(\S+)", re.MULTILINE)
 _SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+# Match `PEP 503`, `PEP-503`, and reST role `:pep:`503`` forms.
+_PEP_REF_PATTERN = re.compile(r"(?:PEP[\s-]|:pep:`)(\d{3,4})", re.IGNORECASE)
+_PEP_CONTEXT_K = 3
 _VALID_PEP_STATUSES = {"Draft", "Accepted", "Final", "Withdrawn", "Rejected"}
 
 _SYSTEM_PROMPT = """\
@@ -107,6 +111,9 @@ def feature_extract(shard: _Shard) -> dict:
     pep_id = shard["pep_id"]
     source = shard["source"]
     user_prompt = f"PEP id: {source.pep_id}\n\nPEP body:\n\n{source.body}"
+    referenced_context = _retrieve_referenced_pep_context(source.pep_id, source.body)
+    if referenced_context:
+        user_prompt = f"{user_prompt}\n\nReferenced PEP context:\n\n{referenced_context}"
 
     try:
         raw = llm.call("feature_extract", system=_SYSTEM_PROMPT, user=user_prompt)
@@ -117,6 +124,43 @@ def feature_extract(shard: _Shard) -> dict:
     pep_status = _detect_pep_status(source.body)
     features = [_to_feature(pep_id, ef, pep_status) for ef in extraction.features]
     return {"features": features}
+
+
+def _retrieve_referenced_pep_context(current_pep_id: str, body: str) -> str:
+    """Pull spec snippets for cross-referenced PEPs from the local RAG store.
+
+    Lets the extractor ground its claims on actual referenced-PEP text rather
+    than invent it. Returns "" when nothing is referenced or the store has no
+    matches.
+    """
+    current_num = _pep_number(current_pep_id)
+    referenced = {
+        m.group(1).lstrip("0")
+        for m in _PEP_REF_PATTERN.finditer(body)
+        if m.group(1).lstrip("0") != current_num
+    }
+    if not referenced:
+        return ""
+
+    store = RagStore()
+    blocks: list[str] = []
+    for num in sorted(referenced, key=int):
+        try:
+            snippets = store.query("peps", f"PEP-{num} specification", k=_PEP_CONTEXT_K)
+        except Exception:
+            # RAG augmentation is best-effort: if the store is empty (PEP not
+            # yet ingested) or unreachable, fall through to the un-augmented
+            # prompt rather than failing extraction.
+            continue
+        for snip in snippets:
+            heading = snip.metadata.get("heading", "")
+            blocks.append(f"[PEP-{num} — {heading}] {snip.text}".rstrip())
+    return "\n\n".join(blocks)
+
+
+def _pep_number(pep_id: str) -> str:
+    digits = re.sub(r"\D", "", pep_id)
+    return digits.lstrip("0") or digits
 
 
 def _detect_pep_status(body: str) -> Literal["Draft", "Accepted", "Final", "Withdrawn", "Rejected"]:
