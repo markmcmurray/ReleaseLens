@@ -94,7 +94,7 @@ def _fanout_evidence(state: PipelineState) -> list[Send]:
     sends: list[Send] = []
     for feature in state.get("features", []):
         for tool in _TOOLS:
-            sends.append(Send("evidence_static", {"feature_id": feature.id, "tool": tool}))
+            sends.append(Send("evidence_static", {"tool": tool, "feature": feature}))
     return sends
 
 

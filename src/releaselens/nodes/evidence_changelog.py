@@ -10,19 +10,27 @@ from datetime import UTC, datetime
 from typing import TypedDict
 
 from releaselens.routing import get_model_for
-from releaselens.schemas import ImplementationEvidence, Tool
+from releaselens.schemas import Feature, ImplementationEvidence, Tool
 
 
-class _Shard(TypedDict):
+class _Shard(TypedDict, total=False):
     feature_id: str
     tool: Tool
+    feature: Feature
 
 
 def evidence_changelog(shard: _Shard) -> dict:
     _ = get_model_for(__name__)
+    # LangGraph drops Send-payload fields when a conditional edge hands off
+    # to a different node; the shard here may be empty. The real changelog
+    # node will read state, but the stub just emits a sentinel record so
+    # the pipeline keeps moving.
+    feature = shard.get("feature")
+    feature_id = shard.get("feature_id") or (feature.id if feature else "unknown")
+    tool: Tool = shard.get("tool") or "pip"
     ev = ImplementationEvidence(
-        feature_id=shard["feature_id"],
-        tool=shard["tool"],
+        feature_id=feature_id,
+        tool=tool,
         method="changelog",
         found=True,
         version_first_seen="0.0.0-stub",
