@@ -108,10 +108,14 @@ def run_eval(
     _ensure_pep_files_on_disk(pep_ids)
     target = target or _default_target()
 
+    from releaselens.eval.langfuse_scores import push_scores
+
     results: list[RunResult] = []
     for _ in range(runs):
         run_id = str(uuid.uuid4())
         callbacks = callbacks_factory(run_id) if callbacks_factory else None
         state = run_pipeline(pep_ids, target, run_id=run_id, callbacks=callbacks)
-        results.append(RunResult(run_id=run_id, per_pep=score_state(fixtures, state)))
+        per_pep = score_state(fixtures, state)
+        push_scores(run_id, per_pep)
+        results.append(RunResult(run_id=run_id, per_pep=per_pep))
     return results
