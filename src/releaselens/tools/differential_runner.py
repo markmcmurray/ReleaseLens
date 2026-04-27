@@ -138,6 +138,16 @@ def _run_behavioural_probe(
     """``setup`` lists pip-installable packages (one per line); ``invocation``
     is the shell-style command to run inside the sandbox."""
     packages = [line.strip() for line in test.setup.splitlines() if line.strip()]
+    invalid = [p for p in packages if not _is_pep508_requirement(p)]
+    if invalid:
+        return DifferentialResult(
+            test_id=test.id,
+            outcome="error",
+            detail=(
+                f"setup contains {len(invalid)} non-pip-installable line(s); "
+                f"first: {invalid[0]!r}"
+            ),
+        )
     cmd = test.invocation.split()
     with uv_sandbox.sandbox(packages) as sbx:
         result = sbx.run(cmd)
@@ -214,3 +224,23 @@ def _coerce_expected(raw: str):
         return json.loads(raw)
     except (ValueError, json.JSONDecodeError):
         return raw
+
+
+def _is_pep508_requirement(spec: str) -> bool:
+    """True if ``spec`` parses as a PEP 508 requirement (``foo==1.2``, etc.).
+
+    Used to fail fast when a behavioural_probe's setup field carries prose
+    instead of pip-installable specs — uv would emit a parse error several
+    layers deep otherwise.
+    """
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:
+        # packaging is a transitive dep of pip/uv; fall back to a permissive
+        # check if it's somehow not on the path.
+        return " " not in spec
+    try:
+        Requirement(spec)
+        return True
+    except InvalidRequirement:
+        return False
