@@ -8,6 +8,7 @@ and compares against ground-truth labels via `score.py`. Multi-run averaging via
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,12 +54,16 @@ def run_pipeline(
     target: TargetRef,
     *,
     run_id: str | None = None,
+    callbacks: list | None = None,
 ) -> dict[str, Any]:
     """Invoke the graph once for the given PEP ids and return final state."""
     from releaselens.graph import build_graph
 
     run_id = run_id or str(uuid.uuid4())
     graph = build_graph()
+    config: dict[str, Any] = {"configurable": {"thread_id": run_id}}
+    if callbacks:
+        config["callbacks"] = callbacks
     return graph.invoke(
         {
             "run_id": run_id,
@@ -68,7 +73,7 @@ def run_pipeline(
             "test_retry_budget": 2,
             "test_acceptance_threshold": 0.75,
         },
-        config={"configurable": {"thread_id": run_id}},
+        config=config,
     )
 
 
@@ -94,6 +99,7 @@ def run_eval(
     *,
     runs: int = 1,
     target: TargetRef | None = None,
+    callbacks_factory: Callable[[str], list] | None = None,
 ) -> list[RunResult]:
     fixtures = load_fixtures(fixtures_dir)
     if not fixtures:
@@ -105,6 +111,7 @@ def run_eval(
     results: list[RunResult] = []
     for _ in range(runs):
         run_id = str(uuid.uuid4())
-        state = run_pipeline(pep_ids, target, run_id=run_id)
+        callbacks = callbacks_factory(run_id) if callbacks_factory else None
+        state = run_pipeline(pep_ids, target, run_id=run_id, callbacks=callbacks)
         results.append(RunResult(run_id=run_id, per_pep=score_state(fixtures, state)))
     return results
