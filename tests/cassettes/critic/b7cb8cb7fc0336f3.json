@@ -1,0 +1,14 @@
+{
+  "messages": [
+    {
+      "content": "You are a critic evaluating differential tests for Python packaging tooling.\n\nYou will be given a single spec claim and a candidate test. Score the test on\ntwo axes from 0.0 to 1.0:\n\n- coverage: does this test exercise the claim's truth condition? A test that\n  asserts on something tangential to the claim scores low. A test that\n  precisely targets the assertion the claim makes scores high.\n- determinism: does the test produce a binary signal under a clean fixture?\n  A test whose result depends on environment state, ordering, or fuzzy\n  comparisons scores low. A test that produces an unambiguous PASS/FAIL on\n  a controlled fixture scores high.\n\nProduce structured feedback the author can act on. If the test is weak, name\nthe specific weakness (e.g. \"the invocation depends on global state\") and\nsuggest a concrete fix. If the test is strong, leave feedback empty.\n\nOutput VALID JSON only. No prose before or after. The JSON must match exactly:\n\n{\n  \"coverage_score\": 0.0,\n  \"determinism_score\": 0.0,\n  \"feedback\": \"Specific actionable feedback, or empty string if no issues.\"\n}\n\nDo not output the overall score or an accept/reject decision \u2014 those are\ncomputed deterministically from your two scores. Your job is to judge the\ntwo axes honestly and give the author something to work with on rejection.\n",
+      "role": "system"
+    },
+    {
+      "content": "Claim id: pep-658.metadata-file-serving.claim-01\nClaim type: structural\nSection ref: PEP-658#specification\n\nClaim text:\nEach anchor tag pointing to a distribution MAY have a `data-dist-info-metadata` attribute.\n\nCandidate test:\n{\n  \"test_kind\": \"behavioural_probe\",\n  \"setup\": \"sampleproject==0.1.0\\nsampleproject2==0.1.0\",\n  \"invocation\": \"uv pip install --dry-run --report - sampleproject sampleproject2\",\n  \"expected\": \"data-dist-info-metadata\",\n  \"differentiator\": \"A non-conformant implementation would not include the `data-dist-info-metadata` attribute in the anchor tags pointing to distributions, or would include it in all cases without allowing for its optional presence.\"\n}",
+      "role": "user"
+    }
+  ],
+  "model": "bedrock/eu.amazon.nova-lite-v1:0",
+  "response": "```json\n{\n  \"coverage_score\": 0.5,\n  \"determinism_score\": 0.5,\n  \"feedback\": \"The test partially covers the claim by checking for the presence of the `data-dist-info-metadata` attribute, but it does not explicitly verify the optional nature of the attribute as stated in the claim. To improve coverage, the test should also verify that the attribute is not always present. For determinism, the test relies on the output of a command which can be influenced by environment state or the specific versions of the packages. To improve determinism, consider using a controlled HTML fixture that explicitly includes and excludes the attribute to test both conditions.\"\n}\n```"
+}

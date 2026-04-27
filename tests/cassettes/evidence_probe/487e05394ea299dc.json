@@ -1,0 +1,14 @@
+{
+  "messages": [
+    {
+      "content": "You read a differential-test runner result and write a one-sentence summary\nplus a confidence value. The runner's `outcome` is authoritative \u2014 your\nonly job is interpretation. Do NOT contradict the runner.\n\nOutput VALID JSON only. No prose. Schema:\n\n{\n  \"confidence\": 0.0-1.0,\n  \"version_first_seen\": \"X.Y.Z\" | null,\n  \"notes\": \"<= 200 chars\"\n}\n\nRules:\n- outcome=\"pass\": confidence in [0.8, 0.95]; high but never absolute.\n- outcome=\"fail\": confidence in [0.6, 0.85] (we are confident the feature\n  is NOT present at the tested version).\n- outcome=\"error\": confidence <= 0.3; the test couldn't run.\n- version_first_seen: only set if the test pinned a specific version in\n  setup or invocation; null otherwise.\n- notes: one sentence describing what the runner observed.\n",
+      "role": "system"
+    },
+    {
+      "content": "Test id: pep-658.metadata-file-serving.claim-03.test-00\nTest kind: metadata_assertion\nInvocation: GET https://pypi.org/simple/<package_name>/ :: $.data-dist-info-metadata\nExpected: <hashname>=<hashvalue>\nSetup:\nA registry endpoint that serves a package with a Core Metadata file and its hash.\n\nRunner outcome: error\nRunner detail: Client error '404 Not Found' for url 'https://pypi.org/simple/%3Cpackage_name%3E/'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\nRaw output: \n",
+      "role": "user"
+    }
+  ],
+  "model": "bedrock/eu.amazon.nova-lite-v1:0",
+  "response": "```json\n{\n  \"confidence\": 0.2,\n  \"version_first_seen\": null,\n  \"notes\": \"The test encountered a 404 Not Found error when attempting to access the package.\"\n}\n```"
+}
