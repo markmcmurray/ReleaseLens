@@ -47,3 +47,15 @@ def get_source_dir(tool: Tool) -> Path:
     """
     base = Path(os.environ.get("RELEASELENS_SOURCES_DIR", _DEFAULT_SOURCES_DIR))
     return base / tool
+
+
+_TOOL_REPOS: dict[Tool, str] = {
+    "pip": "pypa/pip",
+    "uv": "astral-sh/uv",
+    "warehouse": "pypi/warehouse",
+}
+
+
+def get_repo_for(tool: Tool) -> str:
+    """``owner/name`` GitHub coordinate for the given tool's source repo."""
+    return _TOOL_REPOS[tool]
