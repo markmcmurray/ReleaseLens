@@ -1,8 +1,86 @@
 # ReleaseLens
 
-Multi-agent pipeline that ingests Python packaging PEPs, reconciles them against real implementations across PyPI Warehouse, `pip`, and `uv`, and produces an impact report against a target codebase served by a pluggable artifact registry.
+ReleaseLens takes a Python packaging PEP and answers a single question: **is this specification actually implemented, where, and what does it mean for the codebase that depends on it?** It decomposes each PEP into atomic spec-claims, hunts for implementation evidence across `pip`, `uv`, and PyPI Warehouse, authors and self-critiques verification tests for the survivors, and renders a Markdown impact report against a target codebase resolved through a pluggable registry connector.
+
+Under the hood it's a multi-agent pipeline orchestrated by LangGraph with a tiered evidence ladder (static grep → changelog archaeology → behavioural probe in a sandboxed venv), an evaluator-optimizer loop for test authoring with asymmetric model routing (Nova Pro author, Nova Lite critic), SQLite-checkpointed state with `resume`, end-to-end Langfuse tracing through three callback seams, deterministic cassette replay so CI never burns tokens, and a graded eval harness that emits feature/evidence F1 per PEP and pushes them back to Langfuse alongside the run trace.
+
+> _**Where it is today:** PEP ingest, feature decomposition, the evidence ladder, test authoring/critique, eval scoring, and Markdown report rendering all run end-to-end against bundled PEPs. The registry-connector layer that resolves a **real target codebase** is still synthetic — `DevpiPublicConnector` returns canned `ResolvedTarget`s, so today's impact reports describe a stub package rather than your project. The evidence-tool calibration that drives F1 against ground truth is also still weak; the scoring is correct, the prompts and thresholds aren't tuned yet. See [Status](#status) for the line-by-line breakdown._
 
 For the full system spec, see [`docs/architecture.md`](docs/architecture.md). For code-generation conventions, see [`AGENTS.md`](AGENTS.md).
+
+```mermaid
+flowchart TD
+    %% ReleaseLens · LangGraph · ● Pro (gen) · ○ Lite (classify)
+
+    START([START]):::se
+    START ==>|"⚡ per PEP id"| PI1[pep_ingest]:::det
+    START ==> PI2[pep_ingest]:::det
+    PI1 & PI2 --> J1{{after_pep_ingest}}:::join
+
+    J1 ==>|"⚡ per PEP id"| FE1("feature_extract ● Pro"):::pro
+    J1 ==> FE2("feature_extract ● Pro"):::pro
+    FE1 & FE2 --> J2{{after_feature_extract}}:::join
+
+    subgraph LOOP ["evaluator–optimizer loop · budget = 2"]
+        direction LR
+        TA("test_author ● Pro"):::pro -->|differential test| CR("critic ○ Lite"):::lite
+        CR -.->|"rubric feedback"| TA
+    end
+
+    J2 ==>|"⚡ per SpecClaim"| TA
+    CR ==> T_OK([accepted]):::ok
+    CR ==> T_EX([budget_exhausted]):::bad
+    CR ==> T_UN([unverifiable]):::neu
+    T_OK & T_EX & T_UN --> TAG[test_authoring_aggregate]:::det
+    TAG --> J3{{after_test_authoring}}:::join
+
+    subgraph LADDER ["evidence ladder · cost-gated · NOT a loop"]
+        direction TB
+        ES["① evidence_static · ripgrep + ○ Lite"]:::lite
+        EC["② evidence_changelog · GitHub"]:::det
+        EP["③ evidence_probe · uv sandbox · no LLM"]:::probe
+        EA[evidence_aggregate]:::det
+
+        ES ==>|"conf ≥ 0.8 ✓"| EA
+        ES -.->|"conf &lt; 0.8 ↓"| EC
+        EC ==>|"conf ≥ 0.8 ✓"| EA
+        EC -.->|"conf &lt; 0.8 ↓"| EP
+        EP --> EA
+    end
+
+    J3 ==>|"⚡ per (feature × tool)"| ES
+    EA --> MB[matrix_build]:::det
+
+    MB ==>|"⚡ per feature"| V1[verify]:::det
+    MB ==> V2[verify]:::det
+    V1 --> IS1("impact_scope ● Pro"):::pro
+    V2 --> IS2("impact_scope ● Pro"):::pro
+    IS1 & IS2 --> RR[report_render]:::det
+    RR --> END_N([END]):::se
+
+    subgraph SIDE ["cross-cutting · backgrounded"]
+        direction LR
+        TOOLS["tools · ripgrep · PyGithub · ChromaDB · uv · diff runner"]:::side
+        OBS["Langfuse spans · nodes · LLM calls · tools"]:::side
+        DUR["SqliteSaver · checkpoint &amp; resume"]:::side
+    end
+    END_N ~~~ SIDE
+
+    classDef se    fill:#0f172a,stroke:#e2e8f0,color:#f8fafc
+    classDef pro   fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
+    classDef lite  fill:#0e4f5c,stroke:#22d3ee,color:#cffafe
+    classDef det   fill:#14532d,stroke:#86efac,color:#dcfce7
+    classDef probe fill:#7c2d12,stroke:#fdba74,color:#fed7aa
+    classDef join  fill:#78350f,stroke:#fbbf24,color:#fef3c7
+    classDef ok    fill:#166534,stroke:#4ade80,color:#f0fdf4
+    classDef bad   fill:#7f1d1d,stroke:#f87171,color:#fef2f2
+    classDef neu   fill:#1f2937,stroke:#9ca3af,color:#f3f4f6
+    classDef side  fill:#fafafa,stroke:#d4d4d8,color:#71717a
+
+    style LOOP   fill:#1e293b,stroke:#a5b4fc,color:#f1f5f9
+    style LADDER fill:#1c1917,stroke:#fdba74,color:#fafaf9
+    style SIDE   fill:#fafafa,stroke:#e4e4e7,color:#71717a
+```
 
 ## Quickstart
 
@@ -34,6 +112,12 @@ The pipeline runs end-to-end without any of these — each evidence node records
   ```bash
   export GITHUB_TOKEN=ghp_xxx
   ```
+- **AWS credentials with Amazon Bedrock access** for any LLM mode other than `replay` or `stub` (i.e. `record-missing`, `record`, `live`). The pipeline calls Nova Pro and Nova Lite via Bedrock through LiteLLM, so the principal — IAM user, role, or SSO session — needs `bedrock:InvokeModel` on `amazon.nova-pro-v1:0` and `amazon.nova-lite-v1:0`, and **model access for both Nova models must be granted in the Bedrock console** (Bedrock → Model access → Manage model access; Nova model access is opt-in per account/region and is the most common reason a freshly-credentialed run still 403s). Default `replay` mode reads the bundled cassettes and needs none of this.
+  ```bash
+  export AWS_ACCESS_KEY_ID=...
+  export AWS_SECRET_ACCESS_KEY=...
+  export AWS_REGION=us-east-1            # or any region where Nova is available; AWS_PROFILE works too
+  ```
 
 ---
 
@@ -51,8 +135,13 @@ The scaffold is complete: every node, every edge, every schema, and every reduce
 - `pep_ingest` — reads RST from `data/peps/`, parses sections via `releaselens.peps.rst`.
 - `feature_extract` — Nova Pro decomposition into atomic `Feature`s + `SpecClaim`s.
 - `test_author` / `critic` — evaluator-optimizer loop with retry budget and feedback piping (ADR-0007), routed asymmetrically (Pro author, Lite critic).
+- `evidence_static` — derives identifier-like search candidates from claim text, ripgreps the local source clone for each, sends top hits to Nova Lite for found / not_found / ambiguous classification with a confidence score; confidence ≥ threshold short-circuits the escalation ladder.
+- `evidence_changelog` — commit and release archaeology via the GitHub wrapper, escalation rung two when static grep fails the confidence gate.
+- `evidence_probe` — `uv venv`-sandboxed differential runner with three executors (`static_signature`, `behavioural_probe`, `metadata_assertion`), no LLM in the runner path; the rung-three confirmation step.
 
 **Deterministic Python nodes (no LLM).** `evidence_aggregate`, `matrix_build`, `verify`, `impact_scope`, `report_render`.
+
+**Eval harness.** `releaselens eval` loads YAML ground-truth fixtures from `data/fixtures/`, runs the graph end-to-end (replaying cassettes when present), and scores feature decomposition and evidence detection via pure-Python set arithmetic — TP/FP/FN with aggregate, per-tool, and per-method facets. Multi-run averaging via `--runs N` reports mean ± stdev; `feature_f1`, `evidence_f1`, and the per-tool / per-method breakdowns are pushed to Langfuse as scores per run, so eval traces are filterable in the UI alongside the corresponding pipeline traces.
 
 **Tooling layer.** Real implementations with stub-mode parity selected via `RELEASELENS_<TOOL>_MODE`:
 - `tools/ripgrep.py` — streaming stdout wrapper.
@@ -60,6 +149,8 @@ The scaffold is complete: every node, every edge, every schema, and every reduce
 - `tools/rag.py` — ChromaDB collections backed by Bedrock Titan embeddings.
 - `tools/uv_sandbox.py` — per-invocation `uv venv` lifecycle.
 - `tools/differential_runner.py` — three executors (`static_signature`, `behavioural_probe`, `metadata_assertion`); no LLM in the runner path.
+
+**Bundled corpus.** Ten PEP RST documents under `data/peps/` (440, 503, 625, 639, 643, 658, 691, 700, 708, 740) — `make demo` runs the pipeline against 658, 691, and 740 end-to-end. PEP-658 has a graded ground-truth fixture in `data/fixtures/PEP-658.yaml` that drives the eval harness.
 
 **LLM gateway & routing.** LiteLLM call wrapper with cassette record/replay (`src/releaselens/llm.py`); per-node model selection from `config/model_routing.yaml` (currently Amazon Nova family — see the file header for the rationale).
 
@@ -71,12 +162,11 @@ The scaffold is complete: every node, every edge, every schema, and every reduce
 
 ### Not done
 
-The gap between scaffold-complete and architecture-complete is the [§19 done-state checklist](docs/architecture.md#19-done-state-checklist-for-the-implementer). The headline gaps:
+The gap between architecture-complete and "the numbers are publishable" is the [§19 done-state checklist](docs/architecture.md#19-done-state-checklist-for-the-implementer). The headline gaps:
 
-- **Evidence nodes still produce stub records.** `evidence_static`, `evidence_changelog`, `evidence_probe` return deterministic `ImplementationEvidence` instances with `version_first_seen="0.0.0-stub"` rather than wiring the existing tool layer through. The tools exist; the nodes don't call them yet.
-- **`DevpiPublicConnector` is synthetic.** Returns canned `ResolvedArtefact`s; no HTTP traffic to a real devpi.
-- **Only PEP-658 has a fixture.** PEP-691 and PEP-740 are referenced by `make demo` but no RST is bundled. Running `--pep-ids 691,740` will fail at ingest.
-- **Eval harness is a stub.** `eval/runner.py` and `eval/score.py` are placeholders; `data/fixtures/` is empty; `releaselens eval` short-circuits with a "no fixtures" message. Precision/recall/F1 against ground-truth is the next major chunk of work.
+- **Evidence-tool quality is the current bottleneck.** The escalation ladder is wired and the eval harness scores it correctly, but feature- and evidence-level F1 against the PEP-658 fixture are weak: the candidate-derivation prompts, ripgrep query shapes, and confidence thresholds all need tuning before the numbers are anything to point at. Scaffold is right; calibration is the work.
+- **Eval ground-truth is one PEP deep.** Only `data/fixtures/PEP-658.yaml` is labelled. `--pep-ids 691,740` will run end-to-end but produce no eval scores — every other bundled PEP needs a hand-curated YAML fixture before it can be graded.
+- **`DevpiPublicConnector` is synthetic.** Returns canned `ResolvedTarget`s with `pinned_version="0.0.0-stub"`; no HTTP traffic to a real devpi. The Protocol shape is correct; the network code isn't there.
 - **No ADRs committed under `docs/adr/`** despite ADR-0001 through ADR-0007 being referenced throughout the spec.
 - **No `docs/cost_model.md`** with per-stage figures from a baseline run.
 - **`tests/integration/` is empty** — failure-mode coverage from architecture §12.3 not yet exercised.
@@ -94,7 +184,8 @@ uv run releaselens run --pep-ids 658
 
 What to look for:
 - Console prints `run_id: <uuid>` and `report: reports/<run_id>/report.md`.
-- The report has Spec / Reality / Impact sections per Feature; the Reality columns will say `version_first_seen=0.0.0-stub` because the evidence nodes are scaffolded — that's expected and the visible boundary of "done vs not done."
+- The report has Spec / Reality / Impact sections per Feature. The Reality columns are populated by the live evidence ladder when ripgrep + local source clones + `GITHUB_TOKEN` are present (see "Optional system dependencies"); without them, evidence nodes record "skipped" / "no artefacts" notes and the columns show that the rung was unreachable rather than synthetic data.
+- The Impact section will fall back to `version_first_seen=0.0.0-stub` because the registry connector (`DevpiPublicConnector`) is still synthetic — see "Not done."
 - A SQLite checkpoint database appears at `.releaselens/checkpoints.db`.
 
 ### 2. Resume from a checkpoint
@@ -180,11 +271,13 @@ make lint
 make test
 ```
 
-### 7. What does *not* work yet
+### 7. Eval
 
 ```bash
-uv run releaselens run --pep-ids 691,740   # FileNotFoundError — fixtures missing
-uv run releaselens eval                     # prints stub message; no scoring
+uv run releaselens eval                       # scores PEP-658 against data/fixtures/PEP-658.yaml
+uv run releaselens eval --runs 5              # multi-run averaging: mean ± stdev per facet
 ```
 
-These are the natural next pieces of work — see the **Not done** list above.
+What to expect right now: the harness runs end-to-end and surfaces feature/evidence F1 with per-tool and per-method breakdowns, but the numbers are weak — the evidence-tool prompts and confidence thresholds are the next chunk of work (see **Not done** above). Adding more graded PEPs is a matter of dropping additional `data/fixtures/PEP-XXX.yaml` files alongside the existing one; the runner picks them up automatically.
+
+With Langfuse running, every eval run is tagged `eval=true` and emits `feature_f1`, `evidence_f1`, plus `per_tool_*_f1` and `per_method_*_f1` as scores against its run trace, so calibration changes are diffable in the UI.
