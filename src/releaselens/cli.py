@@ -107,6 +107,24 @@ def resume_cmd(run_id: str) -> None:
     click.echo(f"report: {report.markdown_path}")
 
 
+@main.command("ingest-peps", help="Embed data/peps/*.rst into the local Chroma store.")
+@click.option(
+    "--peps-dir",
+    default=str(_DATA_PEPS),
+    show_default=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory of PEP .rst files to ingest.",
+)
+def ingest_peps_cmd(peps_dir: Path) -> None:
+    from releaselens.tools.rag import RagStore
+
+    paths = sorted(peps_dir.glob("*.rst"))
+    if not paths:
+        raise click.ClickException(f"No PEP .rst files found in {peps_dir}.")
+    RagStore().ingest_peps(paths)
+    click.echo(f"Ingested {len(paths)} PEP file(s) from {peps_dir}.")
+
+
 @main.command("eval", help="Score the pipeline against ground-truth fixtures.")
 @click.option("--runs", default=1, show_default=True, type=int)
 def eval_cmd(runs: int) -> None:
