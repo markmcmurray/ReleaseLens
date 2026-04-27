@@ -16,19 +16,23 @@ The `run` command end-to-ends the pipeline against a bundled PEP-658 fixture and
 
 ### Optional system dependencies
 
-The pipeline runs end-to-end without these — `evidence_static` will record a "static search skipped" note and the escalation ladder takes over — but you'll only see real `<tool>:<path>:<line>` source refs when both are present:
+The pipeline runs end-to-end without any of these — each evidence node records a "skipped" / "no artefacts" note and the escalation ladder takes over — but you'll only see real source refs when they're present.
 
-- **`ripgrep`** on `PATH`. Not a Python package, so it can't go in `pyproject.toml`. Install with the platform package manager:
+- **`ripgrep`** on `PATH` (used by `evidence_static`). Not a Python package, so it can't go in `pyproject.toml`. Install with the platform package manager:
   ```bash
   brew install ripgrep            # macOS
   apt-get install ripgrep         # Debian/Ubuntu
   ```
-- **Local source clones** of the tools you want to grep. Defaults are `data/sources/{pip,uv,warehouse}/`; override the parent dir with `RELEASELENS_SOURCES_DIR=/path/to/clones`.
+- **Local source clones** of the tools `evidence_static` should grep. Defaults are `data/sources/{pip,uv,warehouse}/`; override the parent dir with `RELEASELENS_SOURCES_DIR=/path/to/clones`.
   ```bash
   mkdir -p data/sources
   git clone --depth 1 https://github.com/pypa/pip data/sources/pip
   git clone --depth 1 https://github.com/astral-sh/uv data/sources/uv
   git clone --depth 1 https://github.com/pypi/warehouse data/sources/warehouse
+  ```
+- **`GITHUB_TOKEN`** in the environment (used by `evidence_changelog` for commit + release archaeology). Unauthenticated GitHub search is rate-limited to ~10 req/min and blocks the live run with cascading 403s; an authenticated token raises the limit to 30 req/min and is more than enough for the demo. A read-only personal access token suffices.
+  ```bash
+  export GITHUB_TOKEN=ghp_xxx
   ```
 
 ---
