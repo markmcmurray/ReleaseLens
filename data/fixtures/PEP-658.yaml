@@ -1,0 +1,19 @@
+pep_id: PEP-658
+pep_finalised_on: 2021-05-25
+features:
+  - id: pep-658.metadata-file-serving
+    title: Metadata file serving
+    spec_claims:
+      - id: pep-658.metadata-file-serving.claim-01
+        claim_text: "Each anchor tag pointing to a distribution MAY have a data-dist-info-metadata attribute; its presence indicates the distribution MUST contain a Core Metadata file that will not be modified when the distribution is processed and/or installed."
+      - id: pep-658.metadata-file-serving.claim-02
+        claim_text: "If data-dist-info-metadata is present, the repository MUST serve the distribution's Core Metadata file alongside the distribution at the same URL with .metadata appended to the distribution's file name."
+      - id: pep-658.metadata-file-serving.claim-03
+        claim_text: "The data-dist-info-metadata attribute's value MAY be of the form <hashname>=<hashvalue> to provide the metadata file's hash for client-side verification; clients SHOULD verify the hash if provided."
+    expected_evidence:
+      pip:
+        found: true
+        version_first_seen: "22.3"
+      uv:
+        found: true
+        version_first_seen: "0.4.0"

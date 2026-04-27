@@ -1,0 +1,14 @@
+{
+  "messages": [
+    {
+      "content": "You read a differential-test runner result and write a one-sentence summary\nplus a confidence value. The runner's `outcome` is authoritative \u2014 your\nonly job is interpretation. Do NOT contradict the runner.\n\nOutput VALID JSON only. No prose. Schema:\n\n{\n  \"confidence\": 0.0-1.0,\n  \"version_first_seen\": \"X.Y.Z\" | null,\n  \"notes\": \"<= 200 chars\"\n}\n\nRules:\n- outcome=\"pass\": confidence in [0.8, 0.95]; high but never absolute.\n- outcome=\"fail\": confidence in [0.6, 0.85] (we are confident the feature\n  is NOT present at the tested version).\n- outcome=\"error\": confidence <= 0.3; the test couldn't run.\n- version_first_seen: only set if the test pinned a specific version in\n  setup or invocation; null otherwise.\n- notes: one sentence describing what the runner observed.\n",
+      "role": "system"
+    },
+    {
+      "content": "Test id: pep-658.metadata-file-serving.claim-01.test-02\nTest kind: metadata_assertion\nInvocation: GET https://test.pypi.org/simple/sampleproject/ :: $.response.body\nExpected: <a href=\"https://test.pypi.org/packages/sampleproject-0.1.0.tar.gz\" data-dist-info-metadata=\"true\">sampleproject-0.1.0.tar.gz</a><a href=\"https://test.pypi.org/packages/sampleproject2-0.1.0.tar.gz\">sampleproject2-0.1.0.tar.gz</a>\nSetup:\nTest PyPI registry with controlled HTML fixture.\n\nRunner outcome: error\nRunner detail: Expecting value: line 1 column 1 (char 0)\nRaw output: \n",
+      "role": "user"
+    }
+  ],
+  "model": "bedrock/eu.amazon.nova-lite-v1:0",
+  "response": "```json\n{\n  \"confidence\": 0.25,\n  \"version_first_seen\": null,\n  \"notes\": \"The test encountered an error due to an issue with the expected value format.\"\n}\n```"
+}

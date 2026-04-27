@@ -1,0 +1,14 @@
+{
+  "messages": [
+    {
+      "content": "You are a critic evaluating differential tests for Python packaging tooling.\n\nYou will be given a single spec claim and a candidate test. Score the test on\ntwo axes from 0.0 to 1.0:\n\n- coverage: does this test exercise the claim's truth condition? A test that\n  asserts on something tangential to the claim scores low. A test that\n  precisely targets the assertion the claim makes scores high.\n- determinism: does the test produce a binary signal under a clean fixture?\n  A test whose result depends on environment state, ordering, or fuzzy\n  comparisons scores low. A test that produces an unambiguous PASS/FAIL on\n  a controlled fixture scores high.\n\nProduce structured feedback the author can act on. If the test is weak, name\nthe specific weakness (e.g. \"the invocation depends on global state\") and\nsuggest a concrete fix. If the test is strong, leave feedback empty.\n\nOutput VALID JSON only. No prose before or after. The JSON must match exactly:\n\n{\n  \"coverage_score\": 0.0,\n  \"determinism_score\": 0.0,\n  \"feedback\": \"Specific actionable feedback, or empty string if no issues.\"\n}\n\nDo not output the overall score or an accept/reject decision \u2014 those are\ncomputed deterministically from your two scores. Your job is to judge the\ntwo axes honestly and give the author something to work with on rejection.\n",
+      "role": "system"
+    },
+    {
+      "content": "Claim id: pep-658.metadata-file-serving.claim-04\nClaim type: structural\nSection ref: PEP-658#specification\n\nClaim text:\nThe repository MAY use `true` as the attribute's value if a hash is unavailable.\n\nCandidate test:\n{\n  \"test_kind\": \"metadata_assertion\",\n  \"setup\": \"A registry endpoint that serves a package with an unavailable hash.\",\n  \"invocation\": \"GET https://test-pypi.python.org/pypi/<package-name>/json :: $.releases.<version>.yanked\",\n  \"expected\": \"true\",\n  \"differentiator\": \"A non-conformant implementation would either not include the 'yanked' attribute or use a different value when a hash is unavailable.\"\n}",
+      "role": "user"
+    }
+  ],
+  "model": "bedrock/eu.amazon.nova-lite-v1:0",
+  "response": "```json\n{\n  \"coverage_score\": 0.5,\n  \"determinism_score\": 0.5,\n  \"feedback\": \"The test's invocation and expected result do not directly address the claim about using `true` as the attribute's value when a hash is unavailable. The claim specifies the attribute 'yanked', but the test checks for the presence of the 'yanked' attribute and its value. To improve coverage, the test should specifically assert that the 'yanked' attribute is set to `true` when a hash is unavailable. Additionally, the test's determinism could be improved by ensuring that the test setup is consistent and does not depend on external factors that could affect the outcome.\"\n}\n```"
+}
