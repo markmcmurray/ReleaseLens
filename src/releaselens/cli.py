@@ -127,18 +127,81 @@ def ingest_peps_cmd(peps_dir: Path) -> None:
 
 @main.command("eval", help="Score the pipeline against ground-truth fixtures.")
 @click.option("--runs", default=1, show_default=True, type=int)
-def eval_cmd(runs: int) -> None:
-    fixtures_dir = Path("data/fixtures")
-    if not fixtures_dir.exists() or not any(fixtures_dir.glob("*.yaml")):
-        click.echo("No fixtures present (data/fixtures/*.yaml). Eval is a stub in this scaffold.")
+@click.option(
+    "--fixtures-dir",
+    default="data/fixtures",
+    show_default=True,
+    type=click.Path(path_type=Path),
+)
+def eval_cmd(runs: int, fixtures_dir: Path) -> None:
+    from releaselens.eval.runner import load_fixtures, run_eval
+
+    if not fixtures_dir.exists() or not any(fixtures_dir.glob("PEP-*.yaml")):
+        raise click.ClickException(f"No fixtures present at {fixtures_dir}/PEP-*.yaml.")
+
+    fixtures = load_fixtures(fixtures_dir)
+    pep_ids = [fx.pep_id for fx in fixtures]
+
+    def _callbacks_for(run_id: str) -> list:
+        # Tag eval traces per architecture §11.4 so they're filterable in Langfuse.
+        current_run_id.set(run_id)
+        return _trace_callbacks(run_id, pep_ids, None, extra_tags=["eval=true"])
+
+    results = run_eval(fixtures_dir, runs=runs, callbacks_factory=_callbacks_for)
+    _print_eval_summary(results)
+
+
+def _print_eval_summary(results: list) -> None:
+    if not results:
+        click.echo("No eval runs produced.")
         return
-    click.echo(f"Eval stub: would run {runs} run(s) against {fixtures_dir}.")
+
+    pep_ids = sorted(results[0].per_pep)
+
+    click.echo(f"Runs: {len(results)}")
+    for pep_id in pep_ids:
+        feat_f1s = [r.per_pep[pep_id].feature_score.f1 for r in results]
+        ev_f1s = [r.per_pep[pep_id].evidence_scores.aggregate.f1 for r in results]
+        click.echo(f"\n{pep_id}")
+        click.echo(f"  feature  F1: {_fmt_stat(feat_f1s)}")
+        click.echo(f"  evidence F1 (aggregate): {_fmt_stat(ev_f1s)}")
+
+        per_tool: dict[str, list[float]] = {}
+        per_method: dict[str, list[float]] = {}
+        for r in results:
+            ev = r.per_pep[pep_id].evidence_scores
+            for tool, s in ev.per_tool.items():
+                per_tool.setdefault(tool, []).append(s.f1)
+            for method, s in ev.per_method.items():
+                per_method.setdefault(method, []).append(s.f1)
+        for tool in sorted(per_tool):
+            click.echo(f"    by tool   [{tool}]: {_fmt_stat(per_tool[tool])}")
+        for method in sorted(per_method):
+            click.echo(f"    by method [{method}]: {_fmt_stat(per_method[method])}")
+
+    click.echo("\nrun ids: " + ", ".join(r.run_id for r in results))
 
 
-def _trace_callbacks(run_id: str, pep_ids: list[str], target: TargetRef | None) -> list:
+def _fmt_stat(values: list[float]) -> str:
+    from statistics import fmean, pstdev
+
+    if len(values) == 1:
+        return f"{values[0]:.3f}"
+    return f"{fmean(values):.3f} ± {pstdev(values):.3f}"
+
+
+def _trace_callbacks(
+    run_id: str,
+    pep_ids: list[str],
+    target: TargetRef | None,
+    *,
+    extra_tags: list[str] | None = None,
+) -> list:
     tags = [f"pep:{p}" for p in pep_ids]
     if target is not None:
         tags.append(f"target:{target.package}")
+    if extra_tags:
+        tags.extend(extra_tags)
     handler = get_callback_handler(run_id, tags=tags)
     return [handler] if handler is not None else []
 
