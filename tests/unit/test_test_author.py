@@ -91,3 +91,75 @@ def test_stub_response_validates(monkeypatch: pytest.MonkeyPatch) -> None:
     cmd = run_test_author({**_BASE_SHARD})
     assert cmd.update is not None
     assert json.loads(cmd.update["differential_tests"][0].model_dump_json())
+
+
+def test_per_kind_contract_rejects_prose_in_behavioural_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LLM drift: free-form English in a behavioural_probe setup field should
+    fail validation and surface as an error record (not a runnable test)."""
+    monkeypatch.setenv("RELEASELENS_LLM_MODE", "stub")
+    llm.register_stub(
+        "test_author",
+        json.dumps(
+            {
+                "test_kind": "behavioural_probe",
+                "setup": "Create a Python package with the right metadata.",
+                "invocation": "pip install foo",
+                "expected": "data-dist-info-metadata",
+                "differentiator": "older pip omits this",
+            }
+        ),
+    )
+    cmd = run_test_author({**_BASE_SHARD})
+    assert cmd.update is not None
+    assert cmd.update.get("errors"), "expected an error record for malformed test"
+    assert "differential_tests" not in cmd.update
+
+
+def test_per_kind_contract_rejects_non_module_attr_static_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """static_signature invocation must be ``module:attr`` — Python source
+    snippets like ``import x; x.foo()`` are common LLM drift and should be
+    rejected at parse time so the critic loop can iterate."""
+    monkeypatch.setenv("RELEASELENS_LLM_MODE", "stub")
+    llm.register_stub(
+        "test_author",
+        json.dumps(
+            {
+                "test_kind": "static_signature",
+                "setup": "",
+                "invocation": "import pkg; hasattr(pkg, 'x')",
+                "expected": "True",
+                "differentiator": "missing attr",
+            }
+        ),
+    )
+    cmd = run_test_author({**_BASE_SHARD})
+    assert cmd.update is not None
+    assert cmd.update.get("errors")
+    assert "differential_tests" not in cmd.update
+
+
+def test_per_kind_contract_accepts_well_formed_behavioural_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RELEASELENS_LLM_MODE", "stub")
+    llm.register_stub(
+        "test_author",
+        json.dumps(
+            {
+                "test_kind": "behavioural_probe",
+                "setup": "pip==22.3\nrequests>=2.0",
+                "invocation": "pip --version",
+                "expected": "22.3",
+                "differentiator": "older pip prints another version",
+            }
+        ),
+    )
+    cmd = run_test_author({**_BASE_SHARD})
+    assert cmd.update is not None
+    [test] = cmd.update["differential_tests"]
+    assert test.test_kind == "behavioural_probe"
+    assert "pip==22.3" in test.setup

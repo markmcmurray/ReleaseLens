@@ -186,7 +186,9 @@ def _gather_commits(repo: str, query_terms: list[str]) -> list[_Artefact]:
     for term in query_terms:
         try:
             commits = github.search_commits(repo, term, limit=_MAX_COMMITS)
-        except (RuntimeError, LookupError):
+        except Exception:
+            # Best-effort archaeology: swallow rate-limit / auth / parse
+            # errors so one failed term doesn't block the rest of the node.
             continue
         for c in commits:
             if c.sha in seen_shas:
@@ -208,7 +210,7 @@ def _gather_commits(repo: str, query_terms: list[str]) -> list[_Artefact]:
 def _gather_releases(repo: str, query_terms: list[str]) -> list[_Artefact]:
     try:
         releases = github.list_releases(repo, limit=_MAX_RELEASES)
-    except (RuntimeError, LookupError):
+    except Exception:
         return []
     if not releases:
         return []

@@ -34,6 +34,28 @@ def test_stub_unregistered_raises():
         differential_runner.run(_test_obj("missing"))
 
 
+def test_behavioural_probe_rejects_prose_setup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When setup carries free-form English (test_author drift), the runner
+    must short-circuit with a clean ``error`` outcome rather than hand
+    junk to ``uv pip install`` and crash several layers deep."""
+    monkeypatch.setenv("RELEASELENS_DIFFERENTIAL_RUNNER_MODE", "real")
+    monkeypatch.setenv("RELEASELENS_UV_SANDBOX_MODE", "stub")
+
+    test = DifferentialTest(
+        id="t-prose",
+        claim_id="claim-1",
+        test_kind="behavioural_probe",
+        setup="Create a Python package with a 'data-dist-info-metadata' attribute.",
+        invocation="pip install some-pkg",
+        expected="data-dist-info-metadata",
+        differentiator="older pip omits this",
+        iteration=0,
+    )
+    result = differential_runner.run(test)
+    assert result.outcome == "error"
+    assert "non-pip-installable" in result.detail
+
+
 def test_legacy_probe_mode_alias(monkeypatch):
     """RELEASELENS_PROBE_MODE=stub should be honoured when canonical var is unset."""
     monkeypatch.delenv("RELEASELENS_DIFFERENTIAL_RUNNER_MODE", raising=False)

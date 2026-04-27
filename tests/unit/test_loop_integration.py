@@ -50,9 +50,9 @@ def test_author_then_critic_for_one_pep_658_claim() -> None:
     mode = os.environ.get("RELEASELENS_LLM_MODE", "replay")
     if mode == "replay" and not _have_cassettes():
         pytest.skip(
-            "Loop cassettes not recorded yet. Run with "
-            "RELEASELENS_LLM_MODE=record-missing AWS_REGION=eu-west-1 once "
-            "to capture."
+            "Loop cassettes not recorded yet (or invalidated by a prompt "
+            "tightening). Run with RELEASELENS_LLM_MODE=record-missing "
+            "AWS_REGION=eu-west-1 once to capture."
         )
 
     author_cmd = run_test_author(

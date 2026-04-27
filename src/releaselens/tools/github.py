@@ -106,11 +106,18 @@ def register_stub(call: str, *args: Hashable, value) -> None:
 
 def _client():
     from github import Auth, Github
+    from urllib3.util.retry import Retry
 
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         raise RuntimeError("GITHUB_TOKEN is required for real-mode github tool")
-    return Github(auth=Auth.Token(token))
+    # PyGithub's default behaviour is to retry indefinitely on 403/429 with
+    # backoffs that approach a minute each — fine for batch jobs, terrible
+    # in interactive demos where a rate-limited search blocks the whole
+    # pipeline. Cap retries so failures bubble up promptly; node-level code
+    # already degrades to a low-confidence "not found" record.
+    retry = Retry(total=2, backoff_factor=0.5, status_forcelist=(403, 429, 500, 502, 503, 504))
+    return Github(auth=Auth.Token(token), retry=retry, per_page=30)
 
 
 def _date_key(d: date | None) -> str | None:
