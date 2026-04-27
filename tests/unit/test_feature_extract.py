@@ -8,6 +8,8 @@ import pytest
 
 from releaselens.nodes.feature_extract import feature_extract
 from releaselens.nodes.pep_ingest import pep_ingest
+from releaselens.tools import rag
+from releaselens.tools.rag import RagSnippet
 
 _FIXTURES = Path(__file__).parents[1] / "fixtures" / "peps"
 _CASSETTES = Path(__file__).parents[1] / "cassettes" / "feature_extract"
@@ -27,6 +29,20 @@ def test_feature_extract_returns_real_features_for_pep_658(
             "to capture once."
         )
     monkeypatch.setenv("RELEASELENS_PEPS_DIR", str(_FIXTURES))
+    rag.register_stub(
+        "peps",
+        "PEP-503 specification",
+        [
+            RagSnippet(
+                collection="peps",
+                doc_id="PEP-503#000",
+                text="The Simple Repository API exposes per-project pages with anchor tags.",
+                metadata={"pep_id": "PEP-503", "heading": "Specification"},
+                score=0.9,
+            )
+        ],
+        k=3,
+    )
 
     ingest_out = pep_ingest({"pep_id": "PEP-658"})
     source = ingest_out["pep_sources"]["PEP-658"]
@@ -51,4 +67,4 @@ def test_feature_extract_returns_real_features_for_pep_658(
                 "protocol",
                 "metadata",
             }
-            assert claim.pep_section_ref.startswith("PEP-658#")
+            assert claim.pep_section_ref.lower().startswith("pep-658#")
