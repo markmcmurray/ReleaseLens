@@ -1,3 +1,17 @@
+{%- macro fmt_conf(c) -%}{{ "%.2f"|format(c) }}{%- endmacro -%}
+{%- macro cell(ev) -%}
+{%- if ev is none -%}
+[ ]
+{%- elif ev.found -%}
+{%- if ev.source_refs -%}
+[x] [{% if ev.version_first_seen %}{{ ev.version_first_seen }}{% else %}found{% endif %} ({{ fmt_conf(ev.confidence) }})]({{ ev.source_refs[0] }})
+{%- else -%}
+[x] {% if ev.version_first_seen %}{{ ev.version_first_seen }}{% else %}found{% endif %} ({{ fmt_conf(ev.confidence) }})
+{%- endif -%}
+{%- else -%}
+[ ] not found ({{ fmt_conf(ev.confidence) }})
+{%- endif -%}
+{%- endmacro -%}
 # ReleaseLens Report
 
 **Run:** {{ run_id }}
@@ -6,30 +20,59 @@
 
 ## Executive summary
 
-- Features: {{ features | length }}
-- PEPs: {{ pep_ids | length }}
-- Verifications: {{ verifications | length }}
-- Impacts: {{ impacts | length }}
+| Metric | Value |
+|---|---|
+| PEPs analysed | {{ pep_ids | length }} |
+| Features extracted | {{ features | length }} |
+| Verifications | {{ verifications | length }} |
+| Impact findings | {{ impacts | length }} |
 
-## Per PEP
+## Per-PEP matrix
+{% for view in pep_views %}
+### {{ view.pep_id }}{% if view.pep_status %} — {{ view.pep_status }}{% endif %}{% if view.pep_finalised_on %} (finalised {{ view.pep_finalised_on.isoformat() }}){% endif %}
 
-{% for pep_id, matrix in matrices.items() %}
-### {{ pep_id }}
+{% if view.timeline_entries %}
+```mermaid
+gantt
+    title {{ view.pep_id }} — implementation lag (PEP-finalised → first impl)
+    dateFormat YYYY-MM-DD
+    axisFormat %Y-%m
+{% for entry in view.timeline_entries %}    section {{ entry.feature_id }}
+    {{ entry.earliest_tool }} (+{{ entry.temporal_gap_days }}d) :crit, {{ entry.pep_finalised_on.isoformat() }}, {{ entry.temporal_gap_days }}d
+{% endfor %}```
 
-{% for row in matrix.rows %}
-- **{{ row.feature_id }}** — {{ row.consensus_status }}
+{% endif %}
+| Feature |{% for tool in tool_columns %} {{ tool }} |{% endfor %} Consensus | First seen | PEP→impl gap |
+|---|{% for tool in tool_columns %}---|{% endfor %}---|---|---|
+{% for r in view.feature_rows %}| [{{ r.row.feature_id }}](#{{ r.row.feature_id | replace(".", "-") | replace("_", "-") }}) |{% for tool in tool_columns %} {{ cell(r.row.per_tool.get(tool)) }} |{% endfor %} {{ r.row.consensus_status }} | {% if r.first_seen_tool %}{{ r.first_seen_tool }}{% if r.first_seen_version %} @ {{ r.first_seen_version }}{% endif %}{% else %}—{% endif %} | {% if r.temporal_gap_days is not none %}{{ r.temporal_gap_days }}d{% else %}—{% endif %} |
 {% endfor %}
 {% endfor %}
-
 ## Per feature
+{% for view in pep_views %}{% for r in view.feature_rows %}
+#### {{ r.row.feature_id }}
+{% if r.feature %}
+{{ r.feature.description }}
 
-{% for feature in features %}
-### {{ feature.id }}
-
-{{ feature.description }}
-
+{% if r.feature.spec_claims %}**Spec claims:**
+{% for claim in r.feature.spec_claims %}- ({{ claim.claim_type }}) {{ claim.claim_text }}
 {% endfor %}
+{% endif %}
+{% endif %}**Evidence:**
+{% for tool in tool_columns %}{% set ev = r.row.per_tool.get(tool) %}{% if ev %}
+<details><summary>{{ tool }} — {% if ev.found %}found{% if ev.version_first_seen %} {{ ev.version_first_seen }}{% endif %}{% else %}not found{% endif %} (conf {{ fmt_conf(ev.confidence) }}, {{ ev.method }})</summary>
 
-## Appendix
-
-Run metadata, model routing, errors. STUB.
+{% if ev.source_refs %}Source: {% for ref in ev.source_refs %}{% if not loop.first %}, {% endif %}{{ ref }}{% endfor %}
+{% endif %}{% if ev.raw_excerpt %}
+> {{ ev.raw_excerpt | replace("\n", "\n> ") }}
+{% endif %}{% if ev.notes %}
+Notes: {{ ev.notes }}
+{% endif %}
+</details>
+{% endif %}{% endfor %}
+{% if r.verification %}**Verification:** {% if r.verification.earliest_tool %}earliest tool {{ r.verification.earliest_tool }}{% endif %}{% if r.temporal_gap_days is not none %}, temporal gap {{ r.temporal_gap_days }}d{% endif %}{% if r.verification.notes %} — {{ r.verification.notes }}{% endif %}
+{% endif %}{% if r.impact %}**Impact ({{ r.impact.target.connector }}/{{ r.impact.target.package }}{% if r.impact.target.version %}@{{ r.impact.target.version }}{% endif %}):** effort {{ r.impact.effort_estimate }}, confidence {{ fmt_conf(r.impact.confidence) }}{% if r.impact.risk_notes %} — risk: {{ r.impact.risk_notes }}{% endif %}
+- Current: {{ r.impact.current_behaviour }}
+- Delta: {{ r.impact.delta_description }}
+{% if r.impact.affected_paths %}- Affected paths: {% for p in r.impact.affected_paths %}{% if not loop.first %}, {% endif %}`{{ p }}`{% endfor %}
+{% endif %}{% endif %}
+{% endfor %}{% endfor %}
