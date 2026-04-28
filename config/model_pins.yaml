@@ -1,10 +1,12 @@
 # Exact Bedrock model IDs. Family aliases in model_routing.yaml resolve here.
 # Pin before any eval run for reproducibility (architecture.md §6).
 #
-# Currently pinned to Amazon Nova because Anthropic-on-Bedrock requires a
-# use-case form submission per account. The two pinned families below have
-# direct on-demand access. Architecture §12.3 / ADR-0003 names cross-family
-# Bedrock fallback as a designed-in capability — Nova fills that role.
+# Currently routing uses Mistral Pixtral Large for the Pro tier and Amazon
+# Nova-2-Lite for the cheap tier because Anthropic-on-Bedrock requires a
+# use-case form submission per account. All four pinned families below have
+# direct on-demand access in eu-west-1. Architecture §12.3 / ADR-0003 names
+# cross-family Bedrock fallback as a designed-in capability — Pixtral and Nova
+# fill that role today.
 #
 # When Anthropic use-case approval propagates, additional pins can be added:
 #   bedrock/anthropic.claude-sonnet: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -15,6 +17,8 @@
 #   aws bedrock list-inference-profiles --region eu-west-1
 
 pins:
+  bedrock/mistral.pixtral-large: bedrock/eu.mistral.pixtral-large-2502-v1:0
+  bedrock/amazon.nova-2-lite: bedrock/eu.amazon.nova-2-lite-v1:0
   bedrock/amazon.nova-pro: bedrock/eu.amazon.nova-pro-v1:0
   bedrock/amazon.nova-lite: bedrock/eu.amazon.nova-lite-v1:0
   bedrock/meta.llama-3-3-70b-instruct: bedrock/meta.llama3-3-70b-instruct-v1:0

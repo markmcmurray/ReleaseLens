@@ -112,11 +112,11 @@ The pipeline runs end-to-end without any of these — each evidence node records
   ```bash
   export GITHUB_TOKEN=ghp_xxx
   ```
-- **AWS credentials with Amazon Bedrock access** for any LLM mode other than `replay` or `stub` (i.e. `record-missing`, `record`, `live`). The pipeline calls Nova Pro and Nova Lite via Bedrock through LiteLLM, so the principal — IAM user, role, or SSO session — needs `bedrock:InvokeModel` on `amazon.nova-pro-v1:0` and `amazon.nova-lite-v1:0`, and **model access for both Nova models must be granted in the Bedrock console** (Bedrock → Model access → Manage model access; Nova model access is opt-in per account/region and is the most common reason a freshly-credentialed run still 403s). Default `replay` mode reads the bundled cassettes and needs none of this.
+- **AWS credentials with Amazon Bedrock access** for any LLM mode other than `replay` or `stub` (i.e. `record-missing`, `record`, `live`). The pipeline calls Mistral Pixtral Large (Pro tier) and Amazon Nova-2-Lite (cheap tier) via Bedrock through LiteLLM, so the principal — IAM user, role, or SSO session — needs `bedrock:InvokeModel` on `mistral.pixtral-large-2502-v1:0` and `amazon.nova-2-lite-v1:0`, and **model access for both must be granted in the Bedrock console** (Bedrock → Model access → Manage model access; access is opt-in per account/region and is the most common reason a freshly-credentialed run still 403s). Default `replay` mode reads the bundled cassettes and needs none of this.
   ```bash
   export AWS_ACCESS_KEY_ID=...
   export AWS_SECRET_ACCESS_KEY=...
-  export AWS_REGION=us-east-1            # or any region where Nova is available; AWS_PROFILE works too
+  export AWS_REGION=eu-west-1            # pinned models live in eu-west-1; AWS_PROFILE works too
   ```
 
 ---
