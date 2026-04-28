@@ -2,11 +2,13 @@
 # In the scaffold, every node resolves to "stub" via routing.get_model_for().
 # Real Bedrock IDs are pinned in model_pins.yaml and referenced by family alias here.
 #
-# Currently routed to Amazon Nova (cross-family fallback per architecture §12.3 /
-# ADR-0003) because Anthropic-on-Bedrock requires a use-case form to be submitted
-# on the AWS console — tracked. Once that's resolved the family aliases below can
-# be flipped back to bedrock/anthropic.claude-{sonnet,haiku} without any node
-# code changes.
+# Currently routed to Mistral Pixtral Large (Pro tier) and Amazon Nova-2-Lite
+# (cheap tier) — cross-family fallback per architecture §12.3 / ADR-0003 —
+# because Anthropic-on-Bedrock requires a use-case form to be submitted on the
+# AWS console (tracked). Pixtral Large is the only non-Anthropic strong-reasoning
+# model available in eu-west-1; Nova-2-Lite supersedes Nova Lite for the cheap
+# nodes. Once Anthropic access propagates the family aliases below can be flipped
+# to bedrock/anthropic.claude-{sonnet,haiku} without any node code changes.
 
 defaults:
   temperature: 0.0
@@ -16,34 +18,34 @@ defaults:
 
 nodes:
   pep_ingest:
-    model: bedrock/amazon.nova-lite
+    model: bedrock/amazon.nova-2-lite
     rationale: "Structural parsing of RST. No reasoning load."
 
   feature_extract:
-    model: bedrock/amazon.nova-pro
+    model: bedrock/mistral.pixtral-large
     max_tokens: 8000
     rationale: "Long PEP context + atomic-feature decomposition needs strong reasoning."
 
   test_author:
-    model: bedrock/amazon.nova-pro
+    model: bedrock/mistral.pixtral-large
     max_tokens: 4000
     rationale: "Differential test generation; asymmetric with critic."
 
   critic:
-    model: bedrock/amazon.nova-lite
+    model: bedrock/amazon.nova-2-lite
     max_tokens: 1500
     rationale: "Score against rubric. Cheaper than the author it critiques."
 
   evidence_static:
-    model: bedrock/amazon.nova-lite
+    model: bedrock/amazon.nova-2-lite
     rationale: "Per (feature, tool) parallel — cost dominates."
 
   evidence_changelog:
-    model: bedrock/amazon.nova-lite
+    model: bedrock/amazon.nova-2-lite
     rationale: "Pattern-match PEP refs in CHANGELOG.md."
 
   evidence_probe:
-    model: bedrock/amazon.nova-lite
+    model: bedrock/amazon.nova-2-lite
     rationale: "Interpret structured probe output."
 
   evidence_aggregate:
@@ -55,14 +57,14 @@ nodes:
     rationale: "Deterministic rollup."
 
   verify:
-    model: bedrock/amazon.nova-pro
+    model: bedrock/mistral.pixtral-large
     rationale: "Claim↔evidence reconciliation."
 
   impact_scope:
-    model: bedrock/amazon.nova-pro
+    model: bedrock/mistral.pixtral-large
     max_tokens: 6000
     rationale: "Engineer-style scoping."
 
   report_render:
-    model: bedrock/amazon.nova-lite
+    model: bedrock/amazon.nova-2-lite
     rationale: "Markdown templating."
